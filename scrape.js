@@ -11,7 +11,7 @@ const xlsx = require('xlsx');
   await page.goto('https://quotes.toscrape.com/'); // Using a demo site for testing
 
   // 2. Extract data (Change these selectors later for your real target site)
-  const scrapedData = await page.$$eval('.quote', elements => {
+  const scrapedData = await page.$$eval('c-esh_lwc_search-product-card', elements => {
     return elements.map(el => ({
       Quote: el.querySelector('.text')?.innerText.trim() || '',
       Author: el.querySelector('.author')?.innerText.trim() || ''
