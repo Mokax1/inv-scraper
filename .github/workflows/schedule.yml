@@ -39,19 +39,21 @@ jobs:
         run: node scrape_site3.js
 
       - name: Execute Outokumpu Scraper
+        continue-on-error: true
         env:
-         OUTOKUMPU_USER: ${{ secrets.OUTOKUMPU_USER }}
-         OUTOKUMPU_PASS: ${{ secrets.OUTOKUMPU_PASS }}
-       run: node scrape_site4.js
+          OUTOKUMPU_USER: ${{ secrets.OUTOKUMPU_USER }}
+          OUTOKUMPU_PASS: ${{ secrets.OUTOKUMPU_PASS }}
+        run: node scrape_site4.js
 
       - name: Upload Debug Files
         if: always()
         uses: actions/upload-artifact@v4
         with:
-           name: debug-files
-           path: |
-             debug.png
-             page.html
+          name: debug-files
+          if-no-files-found: ignore
+          path: |
+            debug.png
+            page.html
 
       - name: Commit and Push All Excel Files
         run: |
