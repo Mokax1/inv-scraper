@@ -6,26 +6,47 @@ const xlsx = require('xlsx');
   const browser = await chromium.launch();
   const page = await browser.newPage();
 
-  // 1. Go to your target website
-  console.log('Navigating...');
-  await page.goto('https://quotes.toscrape.com/'); // Using a demo site for testing
+  console.log('Navigating to Acerinox Direct...');
+  await page.goto('https://www.acerinoxdirect.com/');
 
-  // 2. Extract data (Change these selectors later for your real target site)
+  console.log('Logging in...');
+  await page.getByRole('button', { name: 'Log In' }).click();
+  await page.getByRole('textbox', { name: 'Username' }).click();
+  
+  // Using secure environment variables instead of hardcoded credentials
+  await page.getByRole('textbox', { name: 'Username' }).fill(process.env.HEGO_USER);
+  await page.getByRole('textbox', { name: 'Password' }).click();
+  await page.getByRole('textbox', { name: 'Password' }).fill(process.env.HEGO_PASS);
+  
+  await page.getByRole('button', { name: 'Log In' }).click();
+
+  console.log('Navigating to Excess Stock...');
+  await page.getByRole('link', { name: 'Excess Stock' }).click();
+
+  console.log('Waiting for Salesforce Lightning components to load...');
+  // This forces Playwright to pause and wait until the list actually appears on screen
+  await page.waitForSelector('c-esh_lwc_search-product-card', { timeout: 30000 });
+
+  console.log('Extracting list data...');
   const scrapedData = await page.$$eval('c-esh_lwc_search-product-card', elements => {
-    return elements.map(el => ({
-      Quote: el.querySelector('.text')?.innerText.trim() || '',
-      Author: el.querySelector('.author')?.innerText.trim() || ''
-    }));
+    return elements.map(el => {
+      const rawTitle = el.querySelector('.name-field-line')?.innerText.trim() || '';
+      const allText = el.innerText.trim();
+
+      return {
+        Product: rawTitle,
+        FullDetails: allText 
+      };
+    });
   });
 
   console.log(`Successfully scraped ${scrapedData.length} rows.`);
 
-  // 3. Generate Excel File
+  console.log('Generating Excel File...');
   const worksheet = xlsx.utils.json_to_sheet(scrapedData);
   const workbook = xlsx.utils.book_new();
-  xlsx.utils.book_append_sheet(workbook, worksheet, 'Scraped Data');
+  xlsx.utils.book_append_sheet(workbook, worksheet, 'Excess Stock');
 
-  // 4. Save file locally
   xlsx.writeFile(workbook, 'scraped_data.xlsx');
   console.log('Excel file saved: scraped_data.xlsx');
 
