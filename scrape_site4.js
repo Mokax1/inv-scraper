@@ -1,5 +1,6 @@
 const { chromium } = require('playwright');
 const path = require('path');
+const fs = require('fs');
 
 (async () => {
 
@@ -9,8 +10,32 @@ const path = require('path');
         headless: true
     });
 
-    const context = await browser.newContext({
-        acceptDownloads: true
+    const context = await browser.newContext();
+
+    // Install hooks BEFORE any website JavaScript runs
+    await context.addInitScript(() => {
+
+        window.__capturedBlob = null;
+        window.__capturedDownloadHref = null;
+
+        const originalCreateObjectURL = URL.createObjectURL;
+
+        URL.createObjectURL = function(blob) {
+            window.__capturedBlob = blob;
+            return originalCreateObjectURL.call(this, blob);
+        };
+
+        const originalClick = HTMLAnchorElement.prototype.click;
+
+        HTMLAnchorElement.prototype.click = function() {
+
+            if (this.download || (this.href && this.href.startsWith('blob:'))) {
+                window.__capturedDownloadHref = this.href;
+            }
+
+            return originalClick.call(this);
+        };
+
     });
 
     const page = await context.newPage();
@@ -42,21 +67,48 @@ const path = require('path');
 
     await page.waitForLoadState('networkidle');
 
-    console.log('Downloading product list...');
+    await page.waitForSelector('button.otk-download', {
+        timeout: 60000
+    });
 
-    const downloadPromise = page.waitForEvent('download');
+    console.log('Clicking Download Product List...');
 
-    await page.getByRole('button', {
-        name: /download.*product.*list/i
-    }).click();
+    await page.locator('button.otk-download').click();
 
-    const download = await downloadPromise;
+    console.log('Waiting for Excel blob...');
+
+    await page.waitForFunction(() => window.__capturedBlob !== null, {
+        timeout: 60000
+    });
+
+    console.log('Blob captured.');
+
+    const base64 = await page.evaluate(async () => {
+
+        const blob = window.__capturedBlob;
+
+        const buffer = await blob.arrayBuffer();
+
+        let binary = '';
+
+        const bytes = new Uint8Array(buffer);
+
+        for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+
+        return btoa(binary);
+
+    });
 
     const outputPath = path.join(process.cwd(), 'outokumpu_data.xlsx');
 
-    await download.saveAs(outputPath);
+    fs.writeFileSync(
+        outputPath,
+        Buffer.from(base64, 'base64')
+    );
 
-    console.log('Download complete.');
+    console.log('Excel saved successfully:', outputPath);
 
     await browser.close();
 
