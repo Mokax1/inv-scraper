@@ -35,6 +35,7 @@ jobs:
           echo '${{ secrets.MICROSOFT_SESSION }}' > auth_state.json
 
       - name: Execute Arvedi AST Scraper
+        continue-on-error: true
         run: node scrape_site3.js
 
       - name: Commit and Push All Excel Files
