@@ -25,6 +25,9 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Execute Scraper Script
+        env:
+          HEGO_USER: ${{ secrets.HEGO_USER }}
+          HEGO_PASS: ${{ secrets.HEGO_PASS }}
         run: node scrape.js
 
       - name: Commit and Push Excel File
