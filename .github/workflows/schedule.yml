@@ -38,6 +38,12 @@ jobs:
         continue-on-error: true
         run: node scrape_site3.js
 
+      - name: Execute Outokumpu Scraper
+        env:
+         OUTOKUMPU_USER: ${{ secrets.OUTOKUMPU_USER }}
+         OUTOKUMPU_PASS: ${{ secrets.OUTOKUMPU_PASS }}
+       run: node scrape_site4.js
+
       - name: Upload Debug Files
         if: always()
         uses: actions/upload-artifact@v4
