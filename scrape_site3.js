@@ -9,10 +9,28 @@ const xlsx = require('xlsx');
   const page = await context.newPage();
 
   console.log('Infiltrating Arvedi AST...');
-  await page.goto('https://excess.acciaiterni.it/cambiaFunzioneUtenteAttiva?funzioneUtenteAttiva=1');
+  await page.goto(
+  'https://excess.acciaiterni.it/cambiaFunzioneUtenteAttiva?funzioneUtenteAttiva=1',
+  { waitUntil: 'networkidle' }
+);
 
-  console.log('Waiting for table to load...');
-  await page.waitForSelector('#idTabella tbody tr', { timeout: 30000 });
+console.log("Current URL:", page.url());
+
+// Save a screenshot of whatever GitHub actually sees
+await page.screenshot({
+  path: "debug.png",
+  fullPage: true
+});
+
+// Save the HTML too
+const fs = require("fs");
+fs.writeFileSync("page.html", await page.content());
+
+console.log("Waiting for table...");
+
+await page.waitForSelector('#idTabella tbody tr', {
+  timeout: 30000
+});
 
   // --- NEW OPTIMIZATION STEP ---
   console.log('Optimizing pagination: Switching to 100 entries per page...');
