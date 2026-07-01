@@ -2,8 +2,8 @@ name: Daily Scraper Cron
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Runs every day at midnight UTC
-  workflow_dispatch: # Allows manual trigger button in GitHub UI
+    - cron: '0 0 * * *'
+  workflow_dispatch:
 
 jobs:
   scrape-and-commit:
@@ -24,16 +24,23 @@ jobs:
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps chromium
 
-      - name: Execute Scraper Script
+      - name: Execute Acerinox Scraper
         env:
           HEGO_USER: ${{ secrets.HEGO_USER }}
           HEGO_PASS: ${{ secrets.HEGO_PASS }}
         run: node scrape.js
 
-      - name: Commit and Push Excel File
+      - name: Reconstruct Microsoft Session
+        run: |
+          echo '${{ secrets.MICROSOFT_SESSION }}' > auth_state.json
+
+      - name: Execute Arvedi AST Scraper
+        run: node scrape_site3.js
+
+      - name: Commit and Push All Excel Files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add scraped_data.xlsx
+          git add *.xlsx
           git commit -m "chore: update daily scraped data" || echo "No changes to commit"
           git push
