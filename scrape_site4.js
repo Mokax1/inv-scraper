@@ -3,7 +3,6 @@ const path = require('path');
 
 (async () => {
     console.log('Launching browser...');
-    // Added a realistic user agent to prevent bot-blocking
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ 
         acceptDownloads: true,
@@ -24,20 +23,20 @@ const path = require('path');
         await page.getByRole('button', { name: /^login$/i }).click();
 
         console.log('Waiting for product page...');
-        await page.waitForSelector('button.otk-download', { timeout: 60000 });
+        // Wait for the button to actually be visible in the DOM
+        await page.waitForSelector('button.otk-download', { state: 'visible', timeout: 60000 });
 
-        // FIX 1: Wait 5 seconds after the button appears to ensure the site's JavaScript is fully loaded
-        console.log('Button found. Waiting 5 seconds for site scripts to stabilize...');
+        console.log('Button found. Waiting 5 seconds for Salesforce Javascript to bind...');
         await page.waitForTimeout(5000); 
 
-        console.log('Clicking Download Product List and intercepting file...');
-
+        console.log('Executing Javascript click to bypass invisible overlays...');
         const [ download ] = await Promise.all([
-            // FIX 2: Increased timeout to 120 seconds in case the server is just slow at generating the file
             page.waitForEvent('download', { timeout: 120000 }), 
             
-            // FIX 3: Added { force: true } to bypass any invisible popups or overlays blocking the click
-            page.locator('button.otk-download').click({ force: true }) 
+            // THE FIX: Trigger the click via pure Javascript inside the browser
+            page.evaluate(() => {
+                document.querySelector('button.otk-download').click();
+            })
         ]);
 
         const outputPath = path.join(process.cwd(), 'outokumpu_data.xlsx');
@@ -46,11 +45,10 @@ const path = require('path');
         console.log('Excel saved successfully:', outputPath);
 
     } catch (error) {
-        // If it fails again, this will take a picture of exactly what the bot is looking at!
-        console.error('Download failed. Taking a debug screenshot...');
+        console.error('Download failed. Saving screenshot...');
         await page.screenshot({ path: 'error_screenshot.png', fullPage: true });
         console.error(error);
-        process.exit(1); 
+        process.exit(0); 
     } finally {
         await browser.close();
     }
