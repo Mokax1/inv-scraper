@@ -2,7 +2,7 @@ name: Daily Scraper Cron
 
 on:
   schedule:
-    - cron: '0 7 * * *' # 7:00 AM UTC = 9:00 AM Netherlands Time
+    - cron: '0 7 * * 1-5' # 7:00 AM UTC = 9:00 AM Netherlands Summer Time (Mon-Fri)
   workflow_dispatch:
 
 jobs:
@@ -24,8 +24,7 @@ jobs:
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps chromium
 
-      # 1. OUTOKUMPU GOES FIRST (The Gatekeeper)
-      # Notice we removed "continue-on-error: true" so if it fails/times out, everything stops.
+      # 1. OUTOKUMPU GOES FIRST (The Boss / Gatekeeper)
       - name: Execute Outokumpu Scraper
         env:
           OUTOKUMPU_USER: ${{ secrets.OUTOKUMPU_USER }}
