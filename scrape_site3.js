@@ -19,7 +19,7 @@ const fs = require('fs');
         const page = await context.newPage();
 
         //----------------------------------------------------
-        // Start from OAuth success page
+        // Open session
         //----------------------------------------------------
 
         console.log('Opening Microsoft session...');
@@ -32,7 +32,7 @@ const fs = require('fs');
         console.log('Current URL:', page.url());
 
         //----------------------------------------------------
-        // Accept cookies if popup exists
+        // Cookies
         //----------------------------------------------------
 
         try {
@@ -49,7 +49,7 @@ const fs = require('fs');
         }
 
         //----------------------------------------------------
-        // Open Available Material directly
+        // Open Available Material
         //----------------------------------------------------
 
         console.log('Opening Available Material...');
@@ -74,7 +74,7 @@ const fs = require('fs');
         });
 
         //----------------------------------------------------
-        // Change page size to 100
+        // Set 100 rows/page
         //----------------------------------------------------
 
         console.log('Changing page size to 100...');
@@ -107,15 +107,31 @@ const fs = require('fs');
                     if (columns.length < 13) return null;
 
                     return {
+
                         Coil: columns[1].innerText.trim(),
+
                         KG: columns[2].innerText.trim(),
+
                         SteelGrade: columns[3].innerText.trim(),
+
                         Thick: columns[4].innerText.trim(),
+
                         Width: columns[5].innerText.trim(),
+
                         Length: columns[6].innerText.trim(),
+
                         Shape: columns[7].innerText.trim(),
+
+                        Edge: columns[8].innerText.trim(),
+
+                        Choice: columns[9].innerText.trim(),
+
                         Finish: columns[10].innerText.trim(),
+
+                        PVC: columns[11].innerText.trim(),
+
                         Price: columns[12].innerText.trim()
+
                     };
 
                 }).filter(Boolean);
@@ -147,6 +163,7 @@ const fs = require('fs');
             }, firstRowBefore);
 
             pageNumber++;
+
         }
 
         //----------------------------------------------------
@@ -178,6 +195,7 @@ const fs = require('fs');
                 const pages = await browser.contexts()[0]?.pages();
 
                 if (pages && pages.length) {
+
                     await pages[0].screenshot({
                         path: 'debug.png',
                         fullPage: true
@@ -187,14 +205,17 @@ const fs = require('fs');
                         'page.html',
                         await pages[0].content()
                     );
+
                 }
 
             } catch {}
 
             await browser.close();
+
         }
 
         process.exit(1);
+
     }
 
 })();
