@@ -6,7 +6,7 @@ const xlsx = require('xlsx');
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-        timezoneId: 'Europe/Paris' // Keep the CET timezone intact
+        timezoneId: 'Europe/Paris' // Forces the bot's clock to CET
     });
     const page = await context.newPage();
 
@@ -18,6 +18,10 @@ const xlsx = require('xlsx');
         await page.getByRole('textbox', { name: /username/i }).fill(process.env.OUTOKUMPU_USER);
         await page.getByRole('textbox', { name: /password/i }).fill(process.env.OUTOKUMPU_PASS);
         await page.getByRole('button', { name: /^login$/i }).click();
+
+        // THE FIX: Wait 10 full seconds for Salesforce to finish its redirects and render the dashboard
+        console.log('Waiting 10 seconds for the dashboard to render...');
+        await page.waitForTimeout(10000); 
 
         // --- THE GATEKEEPER LOOP ---
         console.log('Checking if Outokumpu stock is live or updating...');
@@ -35,8 +39,11 @@ const xlsx = require('xlsx');
                 attempts++;
                 console.log(`[Attempt ${attempts}] Outokumpu is late. Sleeping for 5 minutes...`);
                 await page.waitForTimeout(5 * 60 * 1000); // Wait 300,000 milliseconds (5 mins)
+                
                 console.log('Refreshing page to check again...');
                 await page.reload({ waitUntil: 'networkidle' });
+                // Give it another 10 seconds to render after the reload
+                await page.waitForTimeout(10000); 
             } else {
                 console.log('Stock is live! Opening the gates...');
                 stockReady = true;
@@ -122,7 +129,7 @@ const xlsx = require('xlsx');
     } catch (error) {
         console.error('Scraping failed. Saving screenshot...');
         await page.screenshot({ path: 'error_screenshot.png', fullPage: true });
-        process.exit(1); // Exit with error so downstream scrapers abort
+        process.exit(1); 
     } finally {
         await browser.close();
     }
