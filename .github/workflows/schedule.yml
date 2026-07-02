@@ -91,6 +91,7 @@ jobs:
             --silent \
             -X POST "${{ secrets.RETOOL_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
+            -H "X-Workflow-Api-Key: ${{ secrets.RETOOL_API_KEY }}" \
             --data @payload.json
 
           echo "Retool workflow triggered successfully."
