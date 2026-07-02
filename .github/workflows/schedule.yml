@@ -2,7 +2,7 @@ name: Daily Scraper Cron
 
 on:
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 7 * * *' # 7:00 AM UTC = 9:00 AM Netherlands Time
   workflow_dispatch:
 
 jobs:
@@ -24,12 +24,22 @@ jobs:
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps chromium
 
+      # 1. OUTOKUMPU GOES FIRST (The Gatekeeper)
+      # Notice we removed "continue-on-error: true" so if it fails/times out, everything stops.
+      - name: Execute Outokumpu Scraper
+        env:
+          OUTOKUMPU_USER: ${{ secrets.OUTOKUMPU_USER }}
+          OUTOKUMPU_PASS: ${{ secrets.OUTOKUMPU_PASS }}
+        run: node scrape_site4.js
+
+      # 2. ACERINOX RUNS SECOND
       - name: Execute Acerinox Scraper
         env:
           HEGO_USER: ${{ secrets.HEGO_USER }}
           HEGO_PASS: ${{ secrets.HEGO_PASS }}
         run: node scrape.js
 
+      # 3. ARVEDI RUNS LAST
       - name: Reconstruct Microsoft Session
         run: |
           echo '${{ secrets.MICROSOFT_SESSION }}' > auth_state.json
@@ -38,13 +48,6 @@ jobs:
         continue-on-error: true
         run: node scrape_site3.js
 
-      - name: Execute Outokumpu Scraper
-        continue-on-error: true
-        env:
-          OUTOKUMPU_USER: ${{ secrets.OUTOKUMPU_USER }}
-          OUTOKUMPU_PASS: ${{ secrets.OUTOKUMPU_PASS }}
-        run: node scrape_site4.js
-
       - name: Upload Debug Files
         if: always()
         uses: actions/upload-artifact@v4
@@ -52,7 +55,7 @@ jobs:
           name: debug-files
           if-no-files-found: ignore
           path: |
-            debug.png
+            *.png
             page.html
 
       - name: Commit and Push All Excel Files
