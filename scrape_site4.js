@@ -5,8 +5,8 @@ const xlsx = require('xlsx');
     console.log('Launching browser for direct extraction...');
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
-        timezoneId: 'Europe/Paris'
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        timezoneId: 'Europe/Paris' // Keep the CET timezone intact
     });
     const page = await context.newPage();
 
@@ -19,58 +19,77 @@ const xlsx = require('xlsx');
         await page.getByRole('textbox', { name: /password/i }).fill(process.env.OUTOKUMPU_PASS);
         await page.getByRole('button', { name: /^login$/i }).click();
 
+        // --- THE GATEKEEPER LOOP ---
+        console.log('Checking if Outokumpu stock is live or updating...');
+        let stockReady = false;
+        let attempts = 0;
+        const maxAttempts = 24; // Will wait a maximum of 2 hours (24 * 5 mins) before giving up
+
+        while (!stockReady && attempts < maxAttempts) {
+            // Check the page text for their specific warning message
+            const isUpdating = await page.evaluate(() => {
+                return document.body.innerText.includes('We are currently updating our stock');
+            });
+
+            if (isUpdating) {
+                attempts++;
+                console.log(`[Attempt ${attempts}] Outokumpu is late. Sleeping for 5 minutes...`);
+                await page.waitForTimeout(5 * 60 * 1000); // Wait 300,000 milliseconds (5 mins)
+                console.log('Refreshing page to check again...');
+                await page.reload({ waitUntil: 'networkidle' });
+            } else {
+                console.log('Stock is live! Opening the gates...');
+                stockReady = true;
+            }
+        }
+
+        if (!stockReady) {
+            console.error('Fatal: Outokumpu never published their stock after 2 hours. Aborting the entire workflow.');
+            process.exit(1); // Exits with an error code so the other scrapers DO NOT run
+        }
+        // ---------------------------
+
         console.log('Waiting for the data list to load...');
-        // Using the row wrapper class from your screenshot
         await page.waitForSelector('div.cc_product_item', { timeout: 60000 });
 
         console.log('Setting list results to 75 items per page...');
         try {
-            // Find the dropdown that controls page size and set it to 75
             const selects = await page.$$('select');
             for (const select of selects) {
                 const innerText = await select.innerText();
                 if (innerText.includes('75')) {
                     await select.selectOption({ label: '75' }).catch(() => select.selectOption({ value: '75' }));
-                    // Wait for the page to refresh with the 75 items
                     await page.waitForTimeout(4000); 
                     break;
                 }
             }
         } catch (e) {
-            console.log('Could not automatically set to 75, proceeding with default "Show More" loop...');
+            console.log('Could not automatically set to 75, proceeding with default loop...');
         }
 
         console.log('Expanding all products (Clicking "Show Next" until the end)...');
         let hasMore = true;
         while (hasMore) {
-            // Using the exact button class from your second screenshot
             const loadMoreBtn = await page.$('button.cc_show_more');
-            
             if (loadMoreBtn) {
                 const isVisible = await loadMoreBtn.isVisible();
                 if (isVisible) {
                     console.log('Clicking "Show Next Results"...');
                     await loadMoreBtn.click();
-                    // Give Salesforce 3 seconds to fetch and render the next batch of items
                     await page.waitForTimeout(3000); 
                 } else {
-                    hasMore = false; // Button is hidden, we reached the end
+                    hasMore = false; 
                 }
             } else {
-                hasMore = false; // Button no longer exists
+                hasMore = false; 
             }
         }
         
         console.log('All products loaded on the page. Extracting data...');
 
-        // Extracting all rows at once since it's an infinite-scroll style page
         const allScrapedData = await page.$$eval('div.cc_product_item', rows => {
             return rows.map(row => {
-                // Because this is a div-based grid, we can grab the text of the entire row
-                // and split it by newlines to automatically separate the columns
                 const textBlocks = row.innerText.split('\n').map(t => t.trim()).filter(t => t !== '');
-                
-                // Safety check: ensure we have enough data points (ignoring empty/header rows)
                 if (textBlocks.length >= 10) {
                     return {
                         PackageId: textBlocks[0] || '',
@@ -103,7 +122,7 @@ const xlsx = require('xlsx');
     } catch (error) {
         console.error('Scraping failed. Saving screenshot...');
         await page.screenshot({ path: 'error_screenshot.png', fullPage: true });
-        process.exit(0);
+        process.exit(1); // Exit with error so downstream scrapers abort
     } finally {
         await browser.close();
     }
