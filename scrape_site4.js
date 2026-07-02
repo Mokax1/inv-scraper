@@ -3,31 +3,40 @@ const xlsx = require('xlsx');
 
 (async () => {
     console.log('Launching browser for direct extraction...');
+    // Reverted back to headless for the GitHub cloud
     const browser = await chromium.launch({ headless: true });
+    
     const context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-        timezoneId: 'Europe/Paris' // Forces the bot's clock to CET
+        timezoneId: 'Europe/Paris',
+        locale: 'en-GB'
     });
     const page = await context.newPage();
 
     try {
         console.log('Opening Outokumpu...');
-        await page.goto('https://excess-webshop.outokumpu.com/ccrz__CCSiteLogin?startURL=%2Fccrz__ProductList', { waitUntil: 'networkidle' });
+        await page.goto('https://excess-webshop.outokumpu.com/ccrz__CCSiteLogin', { waitUntil: 'networkidle' });
 
         console.log('Logging in...');
+        // Restored your secure environment variables
         await page.getByRole('textbox', { name: /username/i }).fill(process.env.OUTOKUMPU_USER);
         await page.getByRole('textbox', { name: /password/i }).fill(process.env.OUTOKUMPU_PASS);
         await page.getByRole('button', { name: /^login$/i }).click();
 
-        // THE FIX: Wait 10 full seconds for Salesforce to finish its redirects and render the dashboard
-        console.log('Waiting 10 seconds for the dashboard to render...');
+        console.log('Waiting 10 seconds for the backend to process login...');
         await page.waitForTimeout(10000); 
+
+        console.log('Navigating to Excess Stock tab...');
+        await page.getByRole('link', { name: 'Excess Stock', exact: true }).click();
+        
+        console.log('Waiting 5 seconds for the Excess Stock list to load...');
+        await page.waitForTimeout(5000);
 
         // --- THE GATEKEEPER LOOP ---
         console.log('Checking if Outokumpu stock is live or updating...');
         let stockReady = false;
         let attempts = 0;
-        const maxAttempts = 24; // Will wait a maximum of 2 hours (24 * 5 mins) before giving up
+        const maxAttempts = 24; // Will wait a maximum of 2 hours
 
         while (!stockReady && attempts < maxAttempts) {
             const isUpdating = await page.evaluate(() => {
@@ -35,11 +44,20 @@ const xlsx = require('xlsx');
             });
 
             if (isUpdating) {
-                console.log('Bot thinks it is updating! Taking a snapshot and aborting so we can see the ghost...');
-                // Snap a picture right this second
-                await page.screenshot({ path: 'loop_ghost.png', fullPage: true });
-                // Instantly crash the script to bypass the sleep timer
-                process.exit(0); 
+                attempts++;
+                console.log(`[Attempt ${attempts}] The boss is updating stock. Sleeping for 5 minutes...`);
+                await page.waitForTimeout(5 * 60 * 1000); 
+                
+                console.log('Refreshing page to check again...');
+                await page.reload({ waitUntil: 'networkidle' });
+                
+                // Safety net: Re-click the tab just in case the reload drops us on the home screen
+                try {
+                    await page.getByRole('link', { name: 'Excess Stock', exact: true }).click({ timeout: 5000 });
+                } catch (e) {
+                    // Ignore if already on the page
+                }
+                await page.waitForTimeout(5000); 
             } else {
                 console.log('Stock is live! Opening the gates...');
                 stockReady = true;
@@ -48,7 +66,7 @@ const xlsx = require('xlsx');
 
         if (!stockReady) {
             console.error('Fatal: Outokumpu never published their stock after 2 hours. Aborting the entire workflow.');
-            process.exit(1); // Exits with an error code so the other scrapers DO NOT run
+            process.exit(1); // Exits so Acerinox and Arvedi don't run empty-handed
         }
         // ---------------------------
 
