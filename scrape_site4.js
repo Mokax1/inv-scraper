@@ -39,7 +39,7 @@ const xlsx = require('xlsx');
                 // Snap a picture right this second
                 await page.screenshot({ path: 'loop_ghost.png', fullPage: true });
                 // Instantly crash the script to bypass the sleep timer
-                process.exit(1); 
+                process.exit(0); 
             } else {
                 console.log('Stock is live! Opening the gates...');
                 stockReady = true;
