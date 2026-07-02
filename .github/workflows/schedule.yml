@@ -67,12 +67,30 @@ jobs:
 
       - name: Send files to Retool Workflow
         run: |
-          # Encode files to base64
+          echo "Encoding Excel files..."
+
           ACERINOX_B64=$(base64 -w 0 scraped_data.xlsx)
           OUTOKUMPU_B64=$(base64 -w 0 outokumpu_data.xlsx)
           TERNI_B64=$(base64 -w 0 arvedi_data.xlsx)
-          
-          # POST to Retool using the secret you set up
-          curl -X POST "${{ secrets.RETOOL_WEBHOOK_URL }}" \
-          -H "Content-Type: application/json" \
-          -d "{\"acerinox_file\":\"$ACERINOX_B64\", \"outokumpu_file\":\"$OUTOKUMPU_B64\", \"terni_file\":\"$TERNI_B64\"}"
+
+          echo "Creating JSON payload..."
+
+          cat > payload.json <<EOF
+          {
+            "acerinox_file": "$ACERINOX_B64",
+            "outokumpu_file": "$OUTOKUMPU_B64",
+            "terni_file": "$TERNI_B64"
+          }
+          EOF
+
+          echo "Sending payload to Retool..."
+
+          curl \
+            --fail \
+            --show-error \
+            --silent \
+            -X POST "${{ secrets.RETOOL_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            --data @payload.json
+
+          echo "Retool workflow triggered successfully."
