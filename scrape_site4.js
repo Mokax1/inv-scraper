@@ -30,20 +30,16 @@ const xlsx = require('xlsx');
         const maxAttempts = 24; // Will wait a maximum of 2 hours (24 * 5 mins) before giving up
 
         while (!stockReady && attempts < maxAttempts) {
-            // Check the page text for their specific warning message
             const isUpdating = await page.evaluate(() => {
                 return document.body.innerText.includes('We are currently updating our stock');
             });
 
             if (isUpdating) {
-                attempts++;
-                console.log(`[Attempt ${attempts}] Outokumpu is late. Sleeping for 5 minutes...`);
-                await page.waitForTimeout(5 * 60 * 1000); // Wait 300,000 milliseconds (5 mins)
-                
-                console.log('Refreshing page to check again...');
-                await page.reload({ waitUntil: 'networkidle' });
-                // Give it another 10 seconds to render after the reload
-                await page.waitForTimeout(10000); 
+                console.log('Bot thinks it is updating! Taking a snapshot and aborting so we can see the ghost...');
+                // Snap a picture right this second
+                await page.screenshot({ path: 'loop_ghost.png', fullPage: true });
+                // Instantly crash the script to bypass the sleep timer
+                process.exit(1); 
             } else {
                 console.log('Stock is live! Opening the gates...');
                 stockReady = true;
