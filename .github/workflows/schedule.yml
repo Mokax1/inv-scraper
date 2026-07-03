@@ -1,8 +1,6 @@
 name: Daily Scraper Cron
 
 on:
-  schedule:
-    - cron: '*/5 * * * *' # 7:00 AM UTC = 9:00 AM Netherlands Summer Time (Mon-Fri)
   workflow_dispatch:
 
 jobs:
