@@ -68,25 +68,27 @@ const path = require('path');
         // ---------------------------
 
         console.log('Waiting for the download button to be visible...');
-        // Targeting the button from your screenshot
         const downloadButtonSelector = 'button.otk-download';
         await page.waitForSelector(downloadButtonSelector, { timeout: 60000 });
 
-        console.log('Triggering download...');
-        // Promise.all ensures we start listening for the download BEFORE clicking the button
+        console.log('Clicking download and waiting for Salesforce to generate the file...');
+        
+        // Promise.all ensures we start listening BEFORE clicking.
+        // Bumping the timeout to 60 seconds so Salesforce has plenty of time to process.
         const [ download ] = await Promise.all([
-            page.waitForEvent('download'),
+            page.waitForEvent('download', { timeout: 60000 }),
             page.click(downloadButtonSelector)
         ]);
 
-        // Save the file directly to the current directory (your GitHub Action workspace)
+        // Hardcoding the name so Retool can find it in the webhook payload
         const downloadPath = path.join(__dirname, 'outokumpu_data.xlsx');
         
+        console.log(`Salesforce pushed the file. Saving to disk...`);
         
-        console.log(`Saving file as: ${suggestedName}`);
+        // saveAs() automatically waits for the 5+ second download to completely finish
         await download.saveAs(downloadPath);
 
-        console.log(`Success! File saved to ${downloadPath}`);
+        console.log(`Success! File fully downloaded and saved as ${downloadPath}`);
 
     } catch (error) {
         console.error('Script failed. Saving screenshot...');
