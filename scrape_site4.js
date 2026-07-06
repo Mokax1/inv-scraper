@@ -80,8 +80,8 @@ const path = require('path');
         ]);
 
         // Save the file directly to the current directory (your GitHub Action workspace)
-        const suggestedName = download.suggestedFilename();
-        const downloadPath = path.join(__dirname, suggestedName);
+        const downloadPath = path.join(__dirname, 'outokumpu_data.xlsx');
+        
         
         console.log(`Saving file as: ${suggestedName}`);
         await download.saveAs(downloadPath);
