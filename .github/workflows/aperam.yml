@@ -57,3 +57,10 @@ jobs:
             --data @payload.json
             
           echo "Retool workflow triggered successfully."
+
+          - name: Upload Debug Screenshots
+             if: failure() # Only run if the previous step crashed
+             uses: actions/upload-artifact@v4
+             with:
+              name: debug-screenshots
+              path: ./*.png
