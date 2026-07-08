@@ -1,6 +1,9 @@
 name: Aperam Scraper Pipeline
 
 on:
+  workflow_dispatch:
+
+on:
   repository_dispatch:
     types: [trigger-aperam]
 
