@@ -11,11 +11,9 @@ const path = require('path');
   const context = await browser.newContext({ storageState: 'state.json' });
   const page = await context.newPage();
 
-  console.log("Navigating to Aperam...");
-  // Go to the target page first
-  await page.goto('https://www.e-aperam.com/flash-sales/special-offer');
-
-  // Wait a moment for the page to decide if it wants to redirect us to login
+  console.log("Navigating to Aperam Homepage...");
+  // Start at the root so the SPA routes properly
+  await page.goto('https://www.e-aperam.com/');
   await page.waitForLoadState('networkidle');
 
   // 2. The Login Fallback Check
@@ -33,18 +31,35 @@ const path = require('path');
       passwordInput.press('Enter')
     ]);
     
-    console.log("Logged in successfully. Continuing to target page...");
-    
-    if (!page.url().includes('flash-sales/special-offer')) {
-      await page.goto('https://www.e-aperam.com/flash-sales/special-offer');
-      await page.waitForLoadState('networkidle');
-    }
+    console.log("Logged in successfully. Waiting for dashboard to settle...");
+    await page.waitForLoadState('networkidle');
   } else {
     console.log("Session accepted. No login screen detected.");
   }
 
-  // 3. Aggressive Sweeper & Export
-  console.log("Waiting for page to settle...");
+  // 3. UI Navigation (The Human Way)
+  console.log("Clicking through the UI menu: FLASH SALES -> Special Offers...");
+  try {
+    // Wait for and click FLASH SALES
+    const flashSalesMenu = page.locator('text=/FLASH SALES/i').first();
+    await flashSalesMenu.waitFor({ state: 'visible', timeout: 10000 });
+    await flashSalesMenu.click();
+    
+    await page.waitForTimeout(1000); // Give the dropdown a second to animate
+
+    // Wait for and click Special Offers
+    const specialOffersMenu = page.locator('text=/Special Offer/i').first();
+    await specialOffersMenu.waitFor({ state: 'visible', timeout: 5000 });
+    await specialOffersMenu.click();
+    
+  } catch (e) {
+    console.log("Failed to click menu items. Taking screenshot...");
+    await page.screenshot({ path: 'aperam-menu-crash.png', fullPage: true });
+    throw e;
+  }
+
+  // 4. Aggressive Sweeper & Export
+  console.log("Waiting for special offers data to load...");
   await page.waitForLoadState('networkidle', { timeout: 15000 });
 
   console.log("Sweeping for cookie banners and news pop-ups...");
@@ -65,7 +80,6 @@ const path = require('path');
   for (const selector of interceptors) {
     try {
       const btn = page.locator(selector).first();
-      // Only wait 1 second per check so we don't waste time
       if (await btn.isVisible({ timeout: 1000 })) {
         console.log(`Found a blocker! Dismissing using: ${selector}`);
         await btn.click({ force: true });
@@ -94,7 +108,6 @@ const path = require('path');
 
   } catch (error) {
     console.log("Failed to find or click EXPORT ALL! Taking a debug screenshot...");
-    // Save this to a directory where your GitHub Action uploads artifacts
     await page.screenshot({ path: 'aperam-crash-debug.png', fullPage: true });
     
     // Re-throw so the action still correctly fails
