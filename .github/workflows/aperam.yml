@@ -53,7 +53,7 @@ jobs:
             --silent \
             -X POST "https://api.retool.com/v1/workflows/74f64040-4c6e-42d7-b3fd-7853d6dff47c/startTrigger" \
             -H "Content-Type: application/json" \
-            -H "X-Workflow-Api-Key: ${{ secrets.RETOOL_API_KEY }}" \
+            -H "X-Workflow-Api-Key: ${{ secrets.RETOOL_API_KEY_APERAM }}" \
             --data @payload.json
             
           echo "Retool workflow triggered successfully."
