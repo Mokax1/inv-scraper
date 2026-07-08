@@ -21,11 +21,13 @@ const path = require('path');
 
   // 2. Forced Login Check
   console.log("Looking for login fields...");
-  const emailInput = page.locator('input[type="email"], input[name*="email" i]').first();
+  
+  // FIX: Aperam uses Angular Material. The username is type="text", NOT type="email"!
+  const emailInput = page.locator('input[type="text"].mat-mdc-input-element, input[type="email"]').first();
   const passwordInput = page.locator('input[type="password"]').first();
 
   try {
-    // Wait up to 10 seconds specifically for the email field to appear
+    // Wait up to 10 seconds specifically for the input field to appear
     await emailInput.waitFor({ state: 'visible', timeout: 10000 });
     console.log("Login screen detected. Injecting credentials...");
     
@@ -47,7 +49,7 @@ const path = require('path');
       await page.waitForLoadState('networkidle');
     }
   } catch (e) {
-    console.log("No email input found within 10 seconds. Assuming we are already in or blocked by a popup.");
+    console.log("No login input found within 10 seconds. Assuming we are already in or blocked by a popup.");
   }
 
   // 3. Sweeper & Export
