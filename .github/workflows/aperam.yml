@@ -35,14 +35,25 @@ jobs:
           file_pattern: aperam_export.xlsx
 
       - name: Base64 Encode and Send to Retool
-        env:
-          RETOOL_WEBHOOK_URL: ${{ secrets.RETOOL_WEBHOOK_URL }}
         run: |
-          # Convert Excel to Base64 (ignoring newlines)
+          echo "Encoding Aperam Excel file..."
           B64_CONTENT=$(base64 -w 0 aperam_export.xlsx)
           
-          # Send strictly the file to Retool
-          curl -X POST "https://api.retool.com/v1/workflows/74f64040-4c6e-42d7-b3fd-7853d6dff47c/startTrigger" \
+          echo "Creating JSON payload..."
+          cat > payload.json <<EOF
+          {
+            "fileContent": "$B64_CONTENT"
+          }
+          EOF
+          
+          echo "Sending payload to Retool..."
+          curl \
+            --fail \
+            --show-error \
+            --silent \
+            -X POST "https://api.retool.com/v1/workflows/74f64040-4c6e-42d7-b3fd-7853d6dff47c/startTrigger" \
             -H "Content-Type: application/json" \
             -H "X-Workflow-Api-Key: ${{ secrets.RETOOL_API_KEY }}" \
-            -d "{\"fileContent\": \"$B64_CONTENT\"}"
+            --data @payload.json
+            
+          echo "Retool workflow triggered successfully."
