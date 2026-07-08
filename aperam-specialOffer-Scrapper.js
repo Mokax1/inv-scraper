@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 (async () => {
-  // 1. Load the authenticated session (Bypasses 2FA/Email Verification)
+  // 1. Load the authenticated session
   const stateData = JSON.parse(process.env.APERAM_AUTH_STATE);
   fs.writeFileSync('state.json', JSON.stringify(stateData));
 
@@ -15,19 +15,15 @@ const path = require('path');
   await page.goto('https://www.e-aperam.com/flash-sales/special-offer');
   await page.waitForLoadState('networkidle', { timeout: 15000 });
 
-  // Take a "Proof of Life" screenshot right as it loads
-  await page.screenshot({ path: '1-initial-load.png', fullPage: true });
   console.log("CURRENT URL: ", page.url());
 
   // 2. Forced Login Check
   console.log("Looking for login fields...");
   
-  // FIX: Aperam uses Angular Material. The username is type="text", NOT type="email"!
   const emailInput = page.locator('input[type="text"].mat-mdc-input-element, input[type="email"]').first();
   const passwordInput = page.locator('input[type="password"]').first();
 
   try {
-    // Wait up to 10 seconds specifically for the input field to appear
     await emailInput.waitFor({ state: 'visible', timeout: 10000 });
     console.log("Login screen detected. Injecting credentials...");
     
@@ -40,19 +36,23 @@ const path = require('path');
     ]);
     
     console.log("Logged in successfully. CURRENT URL: ", page.url());
-    await page.screenshot({ path: '2-post-login.png', fullPage: true });
 
-    // Force navigate to special offers if the login dumped us on the main dashboard
+    // Fix: Handle the SSO dumping us on the homepage
     if (!page.url().includes('flash-sales/special-offer')) {
+      console.log("Letting auth cookies settle...");
+      await page.waitForTimeout(3000); // 3-second hard pause for session to save
+      
       console.log("Redirecting back to Special Offers...");
       await page.goto('https://www.e-aperam.com/flash-sales/special-offer');
-      await page.waitForLoadState('networkidle');
+      
+      console.log("Waiting for Angular API to fetch data...");
+      await page.waitForTimeout(5000); // 5-second hard pause for the table to render
     }
   } catch (e) {
     console.log("No login input found within 10 seconds. Assuming we are already in or blocked by a popup.");
   }
 
-  // 3. Sweeper & Export
+  // 3. Sweeper
   console.log("Sweeping for cookie banners and news pop-ups...");
   const interceptors = [
     'button:has-text("Accept All")',
@@ -80,10 +80,12 @@ const path = require('path');
     }
   }
 
+  // 4. Export
   console.log("Hunting for the EXPORT ALL button...");
   try {
     const exportBtn = page.getByRole('button', { name: /EXPORT ALL/i });
-    await exportBtn.waitFor({ state: 'visible', timeout: 15000 });
+    // Increased timeout to 20 seconds to guarantee the table finishes loading
+    await exportBtn.waitFor({ state: 'visible', timeout: 20000 });
     
     console.log("Downloading export...");
     const [download] = await Promise.all([
