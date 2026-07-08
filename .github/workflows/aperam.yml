@@ -1,0 +1,52 @@
+name: Aperam Scraper Pipeline
+
+on:
+  repository_dispatch:
+    types: [trigger-aperam]
+
+jobs:
+  scrape-and-process:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright & Dependencies
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install chromium --with-deps
+
+      - name: Run Scraper
+        env:
+          APERAM_AUTH_STATE: ${{ secrets.APERAM_AUTH_STATE }}
+          APERAM_EMAIL: ${{ secrets.APERAM_EMAIL }}
+          APERAM_PASSWORD: ${{ secrets.APERAM_PASSWORD }}
+        run: node aperam-specialOffer-Scrapper.js
+
+      - name: Commit File to Repository
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Auto-update: Aperam Export"
+          file_pattern: aperam_export.xlsx
+
+      - name: Base64 Encode and Send to Retool
+        env:
+          RETOOL_WEBHOOK_URL: ${{ secrets.RETOOL_WEBHOOK_URL }}
+        run: |
+          # Convert Excel to Base64 (ignoring newlines)
+          B64_CONTENT=$(base64 -w 0 aperam_export.xlsx)
+          
+          # We also pass a dummy email body since your Retool script looks for regex in it,
+          # or you can pass the real one from the GitHub Action payload if Power Automate sent it.
+          EMAIL_BODY="${{ github.event.client_payload.emailBody }}"
+          
+          # Send to Retool
+          curl -X POST "$RETOOL_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"fileContent\": \"$B64_CONTENT\", \"emailBody\": \"$EMAIL_BODY\"}"
