@@ -3,6 +3,10 @@ name: Aperam Scraper Pipeline
 on:
   workflow_dispatch:
 
+concurrency:
+  group: scraper-git-push
+  cancel-in-progress: false 
+
 jobs:
   scrape-and-process:
     runs-on: ubuntu-latest
