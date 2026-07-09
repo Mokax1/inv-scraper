@@ -3,6 +3,10 @@ name: Daily Scraper Cron
 on:
   workflow_dispatch:
 
+concurrency:
+  group: scraper-git-push
+  cancel-in-progress: false 
+
 jobs:
   scrape-and-commit:
     runs-on: ubuntu-latest
