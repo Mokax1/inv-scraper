@@ -72,7 +72,6 @@ jobs:
           cat > payload.json <<EOF
           {
             "acerinox_file": "$ACERINOX_B64",
-            "outokumpu_file": "$OUTOKUMPU_B64",
             "terni_file": "$TERNI_B64"
           }
           EOF
