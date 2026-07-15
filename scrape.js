@@ -46,8 +46,18 @@ const xlsx = require('xlsx');
         const pageData = await page.$$eval('c-esh_lwc_search-product-card', elements => {
           return elements.map(el => {
             const rawTitle = el.querySelector('.name-field-line')?.innerText.trim() || '';
+            
+            // --- ADDED PRICE EXTRACTION HERE ---
+            // Targeting the stable classes and ignoring the dynamic 'lwc-' prefix
+            const rawPrice = el.querySelector('.uom-price.price-label')?.innerText.trim() || 'N/A';
+            
             const allText = el.innerText.trim();
-            return { Product: rawTitle, FullDetails: allText };
+            
+            return { 
+              Product: rawTitle, 
+              Price: rawPrice, 
+              FullDetails: allText 
+            };
           });
         });
 
