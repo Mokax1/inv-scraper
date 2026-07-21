@@ -53,7 +53,17 @@ const xlsx = require('xlsx');
 
         allScrapedData.push(...pageData);
 
-        const nextButton = await page.$('button.nav-direction:has-text("Next")'); 
+        let nextButton = null;
+        try {
+          // Wait up to 15 seconds for the Next button to actually be visible on the page
+          nextButton = await page.waitForSelector('button.nav-direction:has-text("Next")', { 
+            state: 'visible', 
+            timeout: 15000 
+          });
+        } catch (e) {
+          // If it times out, it means the button isn't coming (likely the last page)
+          console.log('Next button did not appear within timeout.');
+        }
 
         if (nextButton) {
           const isDisabled = await page.evaluate(btn => btn.hasAttribute('disabled') || btn.disabled, nextButton);
