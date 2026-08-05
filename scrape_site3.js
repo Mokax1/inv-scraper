@@ -74,18 +74,30 @@ const fs = require('fs');
         });
 
         //----------------------------------------------------
-        // Set 100 rows/page
+        // Set 100 rows/page safely
         //----------------------------------------------------
 
         console.log('Changing page size to 100...');
 
-        await page.selectOption('#idTabella_length select', '100');
+        if (await page.$('#idTabella_length select')) {
+            await page.selectOption('#idTabella_length select', '100');
+        }
 
         await page.waitForFunction(() => {
-            return document.querySelectorAll('#idTabella tbody tr').length >= 100;
-        });
+            const infoText = document.querySelector('#idTabella_info')?.textContent || '';
+            const match = infoText.match(/Showing \d+ to (\d+) of (\d+) entries/i);
+            if (!match) return false;
 
-        console.log('100-row table loaded.');
+            const visibleCount = parseInt(match[1], 10);
+            const totalEntries = parseInt(match[2], 10);
+            const actualRows = document.querySelectorAll('#idTabella tbody tr').length;
+
+            if (totalEntries === 0) return true;
+
+            return actualRows === visibleCount;
+        }, { timeout: 30000 });
+
+        console.log('Table fully loaded.');
 
         //----------------------------------------------------
         // Scrape all pages
@@ -144,12 +156,12 @@ const fs = require('fs');
 
             const nextButton = page.locator('#idTabella_next');
 
-            const disabled = await nextButton.evaluate(el =>
-                el.classList.contains('disabled')
-            );
+            const isNextDisabled = await nextButton.evaluate(el => 
+                el.classList.contains('disabled') || el.getAttribute('aria-disabled') === 'true'
+            ).catch(() => true);
 
-            if (disabled) {
-                console.log('Last page reached.');
+            if (isNextDisabled) {
+                console.log('Last page reached or single page available.');
                 break;
             }
 
