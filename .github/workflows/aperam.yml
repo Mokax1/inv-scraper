@@ -55,7 +55,7 @@ jobs:
             --fail \
             --show-error \
             --silent \
-            -X POST "https://api.retool.com/v1/workflows/74f64040-4c6e-42d7-b3fd-7853d6dff47c/startTrigger" \
+            -X POST "https://api.retool.com/v1/workflows/2b9451a1-5d2a-443c-9077-edcd64e3cf4a/startTrigger" \
             -H "Content-Type: application/json" \
             -H "X-Workflow-Api-Key: ${{ secrets.RETOOL_API_KEY_APERAM }}" \
             --data @payload.json
