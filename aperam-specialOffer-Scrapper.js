@@ -17,14 +17,13 @@ const path = require('path');
 
   console.log("CURRENT URL: ", page.url());
 
-  // 2. Forced Login Check
-  console.log("Looking for login fields...");
-  
+  // 2. Forced Login Check (If session expired or not logged in)
   const emailInput = page.locator('input[type="text"].mat-mdc-input-element, input[type="email"]').first();
   const passwordInput = page.locator('input[type="password"]').first();
 
   try {
-    await emailInput.waitFor({ state: 'visible', timeout: 10000 });
+    console.log("Looking for login fields...");
+    await emailInput.waitFor({ state: 'visible', timeout: 5000 });
     console.log("Login screen detected. Injecting credentials...");
     
     await emailInput.fill(process.env.APERAM_EMAIL);
@@ -37,20 +36,20 @@ const path = require('path');
     
     console.log("Logged in successfully. CURRENT URL: ", page.url());
 
-    // Fix: Handle the SSO dumping us on the homepage
     if (!page.url().includes('flash-sales/special-offer')) {
       console.log("Letting auth cookies settle...");
-      await page.waitForTimeout(3000); // 3-second hard pause for session to save
-      
+      await page.waitForTimeout(3000);
       console.log("Redirecting back to Special Offers...");
       await page.goto('https://www.e-aperam.com/flash-sales/special-offer');
-      
-      console.log("Waiting for Angular API to fetch data...");
-      await page.waitForTimeout(5000); // 5-second hard pause for the table to render
     }
   } catch (e) {
-    console.log("No login input found within 10 seconds. Assuming we are already in or blocked by a popup.");
+    console.log("No login input found. Proceeding with stored auth state...");
   }
+
+  // --- FIX: Global wait for Angular/API response ---
+  console.log("Waiting for Angular API to fetch data...");
+  await page.waitForLoadState('networkidle');
+  await page.waitForTimeout(5000); // 5-second pause to let Angular populate the table
 
   // 3. Sweeper
   console.log("Sweeping for cookie banners and news pop-ups...");
@@ -84,7 +83,6 @@ const path = require('path');
   console.log("Hunting for the EXPORT ALL button...");
   try {
     const exportBtn = page.getByRole('button', { name: /EXPORT ALL/i });
-    // Increased timeout to 20 seconds to guarantee the table finishes loading
     await exportBtn.waitFor({ state: 'visible', timeout: 20000 });
     
     console.log("Downloading export...");
