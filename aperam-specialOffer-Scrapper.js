@@ -16,6 +16,7 @@ const path = require('path');
   await page.waitForLoadState('networkidle', { timeout: 15000 });
 
   console.log("CURRENT URL: ", page.url());
+  await page.screenshot({ path: '1-initial-load.png', fullPage: true });
 
   // 2. Forced Login Check (If session expired or not logged in)
   const emailInput = page.locator('input[type="text"].mat-mdc-input-element, input[type="email"]').first();
@@ -46,10 +47,12 @@ const path = require('path');
     console.log("No login input found. Proceeding with stored auth state...");
   }
 
-  // --- FIX: Global wait for Angular/API response ---
+  // --- Global wait for Angular/API response ---
   console.log("Waiting for Angular API to fetch data...");
   await page.waitForLoadState('networkidle');
-  await page.waitForTimeout(5000); // 5-second pause to let Angular populate the table
+  await page.waitForTimeout(5000); // Wait for API table rendering
+
+  await page.screenshot({ path: '2-post-login-state.png', fullPage: true });
 
   // 3. Sweeper
   console.log("Sweeping for cookie banners and news pop-ups...");
@@ -75,9 +78,11 @@ const path = require('path');
         await page.waitForTimeout(1000);
       }
     } catch (e) {
-      // Ignore
+      // Ignore missing popups
     }
   }
+
+  await page.screenshot({ path: '3-post-sweep-state.png', fullPage: true });
 
   // 4. Export
   console.log("Hunting for the EXPORT ALL button...");
@@ -96,8 +101,8 @@ const path = require('path');
     console.log(`Saved successfully to ${downloadPath}`);
 
   } catch (error) {
-    console.log("Failed to find or click EXPORT ALL! Taking a debug screenshot...");
-    await page.screenshot({ path: '3-crash-debug.png', fullPage: true });
+    console.log("Failed to find or click EXPORT ALL! Taking a crash debug screenshot...");
+    await page.screenshot({ path: '4-crash-debug.png', fullPage: true });
     throw error;
   }
 
