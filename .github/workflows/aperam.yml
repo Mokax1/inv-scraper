@@ -63,8 +63,9 @@ jobs:
           echo "Retool workflow triggered successfully."
 
       - name: Upload Debug Screenshots
-        if: failure()
+        if: always() # Uploads screenshots on both success and failure
         uses: actions/upload-artifact@v4
         with:
           name: debug-screenshots
-          path: ./*.png
+          path: '*.png'
+          retention-days: 5
