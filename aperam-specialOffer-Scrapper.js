@@ -16,15 +16,15 @@ const path = require('path');
   await page.waitForLoadState('networkidle', { timeout: 15000 });
 
   console.log("CURRENT URL: ", page.url());
-  await page.screenshot({ path: '1-initial-load.png', fullPage: true });
 
-  // 2. Forced Login Check (If session expired or not logged in)
+  // 2. Forced Login Check
+  console.log("Looking for login fields...");
+  
   const emailInput = page.locator('input[type="text"].mat-mdc-input-element, input[type="email"]').first();
   const passwordInput = page.locator('input[type="password"]').first();
 
   try {
-    console.log("Looking for login fields...");
-    await emailInput.waitFor({ state: 'visible', timeout: 5000 });
+    await emailInput.waitFor({ state: 'visible', timeout: 10000 });
     console.log("Login screen detected. Injecting credentials...");
     
     await emailInput.fill(process.env.APERAM_EMAIL);
@@ -37,22 +37,20 @@ const path = require('path');
     
     console.log("Logged in successfully. CURRENT URL: ", page.url());
 
+    // Fix: Handle the SSO dumping us on the homepage
     if (!page.url().includes('flash-sales/special-offer')) {
       console.log("Letting auth cookies settle...");
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(3000); // 3-second hard pause for session to save
+      
       console.log("Redirecting back to Special Offers...");
       await page.goto('https://www.e-aperam.com/flash-sales/special-offer');
+      
+      console.log("Waiting for Angular API to fetch data...");
+      await page.waitForTimeout(5000); // 5-second hard pause for the table to render
     }
   } catch (e) {
-    console.log("No login input found. Proceeding with stored auth state...");
+    console.log("No login input found within 10 seconds. Assuming we are already in or blocked by a popup.");
   }
-
-  // --- Global wait for Angular/API response ---
-  console.log("Waiting for Angular API to fetch data...");
-  await page.waitForLoadState('networkidle');
-  await page.waitForTimeout(5000); // Wait for API table rendering
-
-  await page.screenshot({ path: '2-post-login-state.png', fullPage: true });
 
   // 3. Sweeper
   console.log("Sweeping for cookie banners and news pop-ups...");
@@ -78,16 +76,15 @@ const path = require('path');
         await page.waitForTimeout(1000);
       }
     } catch (e) {
-      // Ignore missing popups
+      // Ignore
     }
   }
-
-  await page.screenshot({ path: '3-post-sweep-state.png', fullPage: true });
 
   // 4. Export
   console.log("Hunting for the EXPORT ALL button...");
   try {
     const exportBtn = page.getByRole('button', { name: /EXPORT ALL/i });
+    // Increased timeout to 20 seconds to guarantee the table finishes loading
     await exportBtn.waitFor({ state: 'visible', timeout: 20000 });
     
     console.log("Downloading export...");
@@ -101,8 +98,8 @@ const path = require('path');
     console.log(`Saved successfully to ${downloadPath}`);
 
   } catch (error) {
-    console.log("Failed to find or click EXPORT ALL! Taking a crash debug screenshot...");
-    await page.screenshot({ path: '4-crash-debug.png', fullPage: true });
+    console.log("Failed to find or click EXPORT ALL! Taking a debug screenshot...");
+    await page.screenshot({ path: '3-crash-debug.png', fullPage: true });
     throw error;
   }
 
