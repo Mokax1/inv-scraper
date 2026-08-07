@@ -1,40 +1,50 @@
 name: Daily Scraper Cron
 on:
   workflow_dispatch:
+
 concurrency:
   group: scraper-git-push
   cancel-in-progress: false 
+
 jobs:
   scrape-and-commit:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
       - name: Install Node Dependencies
         run: npm install
+
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps chromium
+
       # 1. OUTOKUMPU GOES FIRST (The Boss / Gatekeeper)
       - name: Execute Outokumpu Scraper
         env:
           OUTOKUMPU_USER: ${{ secrets.OUTOKUMPU_USER }}
           OUTOKUMPU_PASS: ${{ secrets.OUTOKUMPU_PASS }}
         run: node scrape_site4.js
+
       # 2. ACERINOX RUNS SECOND
       - name: Execute Acerinox Scraper
         env:
           HEGO_USER: ${{ secrets.HEGO_USER }}
           HEGO_PASS: ${{ secrets.HEGO_PASS }}
         run: node scrape.js
+
       # 3. ARVEDI RUNS LAST
       - name: Reconstruct Microsoft Session
         run: |
           echo '${{ secrets.MICROSOFT_SESSION }}' > auth_state.json
+
       - name: Execute Arvedi AST Scraper
+        continue-on-error: true
         run: node scrape_site3.js
 
       - name: Upload Debug Files
@@ -46,6 +56,7 @@ jobs:
           path: |
             *.png
             page.html
+
       - name: Commit and Push All Excel Files
         run: |
           git config user.name "github-actions[bot]"
@@ -54,12 +65,14 @@ jobs:
           git commit -m "chore: update daily scraped data" || echo "No changes to commit"
           git pull --rebase origin main
           git push origin main
+
       - name: Send files to Retool Workflow
         run: |
           echo "Encoding Excel files..."
-          ACERINOX_B64=$(base64 -w 0 scraped_data.xlsx)
-          OUTOKUMPU_B64=$(base64 -w 0 outokumpu_data.xlsx)
-          TERNI_B64=$(base64 -w 0 arvedi_data.xlsx)
+          ACERINOX_B64=$( [ -f scraped_data.xlsx ] && base64 -w 0 scraped_data.xlsx || echo "" )
+          OUTOKUMPU_B64=$( [ -f outokumpu_data.xlsx ] && base64 -w 0 outokumpu_data.xlsx || echo "" )
+          TERNI_B64=$( [ -f arvedi_data.xlsx ] && base64 -w 0 arvedi_data.xlsx || echo "" )
+
           echo "Creating JSON payload..."
           cat > payload.json <<EOF
           {
@@ -68,6 +81,7 @@ jobs:
             "terni_file": "$TERNI_B64"
           }
           EOF
+
           echo "Sending payload to Retool..."
           curl \
             --fail \
