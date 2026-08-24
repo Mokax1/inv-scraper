@@ -27,11 +27,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       # 2. ACERINOX RUNS SECOND
-      - name: Execute Acerinox Scraper
-        env:
-          HEGO_USER: ${{ secrets.HEGO_USER }}
-          HEGO_PASS: ${{ secrets.HEGO_PASS }}
-        run: node scrape.js
+
 
       # 3. ARVEDI RUNS LAST
       - name: Reconstruct Microsoft Session
@@ -42,6 +38,11 @@ jobs:
         continue-on-error: true
         run: node scrape_site3.js
         
+      - name: Execute Acerinox Scraper
+        env:
+          HEGO_USER: ${{ secrets.HEGO_USER }}
+          HEGO_PASS: ${{ secrets.HEGO_PASS }}
+        run: node scrape.js
 
       - name: Upload Debug Files
         if: always()
