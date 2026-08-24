@@ -85,11 +85,11 @@ const fs = require('fs');
 
         await page.waitForFunction(() => {
             const infoText = document.querySelector('#idTabella_info')?.textContent || '';
-            const match = infoText.match(/Showing \d+ to (\d+) of (\d+) entries/i);
+            const match = infoText.match(/Showing\s+[\d.,]+\s+to\s+([\d.,]+)\s+of\s+([\d.,]+)/i);
             if (!match) return false;
 
-            const visibleCount = parseInt(match[1], 10);
-            const totalEntries = parseInt(match[2], 10);
+            const visibleCount = parseInt(match[1].replace(/[.,]/g, ''), 10);
+            const totalEntries = parseInt(match[2].replace(/[.,]/g, ''), 10);
             const actualRows = document.querySelectorAll('#idTabella tbody tr').length;
 
             if (totalEntries === 0) return true;
@@ -107,51 +107,31 @@ const fs = require('fs');
         let pageNumber = 1;
 
         while (true) {
-
             console.log(`Scraping page ${pageNumber}...`);
 
             const pageData = await page.$$eval('#idTabella tbody tr', rows => {
-
                 return rows.map(row => {
-
                     const columns = row.querySelectorAll('td');
-
                     if (columns.length < 13) return null;
 
                     return {
-
                         Coil: columns[1].innerText.trim(),
-
                         KG: columns[2].innerText.trim(),
-
                         SteelGrade: columns[3].innerText.trim(),
-
                         Thick: columns[4].innerText.trim(),
-
                         Width: columns[5].innerText.trim(),
-
                         Length: columns[6].innerText.trim(),
-
                         Shape: columns[7].innerText.trim(),
-
                         Edge: columns[8].innerText.trim(),
-
                         Choice: columns[9].innerText.trim(),
-
                         Finish: columns[10].innerText.trim(),
-
                         PVC: columns[11].innerText.trim(),
-
                         Price: columns[12].innerText.trim()
-
                     };
-
                 }).filter(Boolean);
-
             });
 
             allScrapedData.push(...pageData);
-
             console.log(`Collected ${allScrapedData.length} rows.`);
 
             const nextButton = page.locator('#idTabella_next');
@@ -175,7 +155,6 @@ const fs = require('fs');
             }, firstRowBefore);
 
             pageNumber++;
-
         }
 
         //----------------------------------------------------
@@ -185,11 +164,9 @@ const fs = require('fs');
         console.log(`Finished. Total rows: ${allScrapedData.length}`);
 
         const worksheet = xlsx.utils.json_to_sheet(allScrapedData);
-
         const workbook = xlsx.utils.book_new();
 
         xlsx.utils.book_append_sheet(workbook, worksheet, 'Arvedi AST');
-
         xlsx.writeFile(workbook, 'arvedi_data.xlsx');
 
         console.log('Excel exported successfully.');
@@ -197,17 +174,12 @@ const fs = require('fs');
         await browser.close();
 
     } catch (err) {
-
         console.error(err);
 
         if (browser) {
-
             try {
-
                 const pages = await browser.contexts()[0]?.pages();
-
                 if (pages && pages.length) {
-
                     await pages[0].screenshot({
                         path: 'debug.png',
                         fullPage: true
@@ -217,17 +189,12 @@ const fs = require('fs');
                         'page.html',
                         await pages[0].content()
                     );
-
                 }
-
             } catch {}
 
             await browser.close();
-
         }
 
         process.exit(1);
-
     }
-
 })();
