@@ -14,7 +14,7 @@ def send_alerts(status_info):
         print("[!] CALLMEBOT_USER secret is missing.")
         return
 
-    # 1. Telegram Text Notification
+    # 1. Telegram Text Message
     text_message = (
         f"🚨 REGISTRATION IS OPEN! 🚨\n\nStatus: {status_info}\nGo register now: "
         "https://alexreg.aast.edu/aastreg/"
@@ -27,10 +27,9 @@ def send_alerts(status_info):
     except Exception as e:
         print(f"[!] Text alert failed: {e}")
 
-    # 2. Phone Call via CallMeBot
+    # 2. Telegram Voice Call
     call_msg = urllib.parse.quote(
-        "AAST registration is now open! Log in and pick your courses"
-        " immediately."
+        "AAST registration is now open! Log in and pick your courses immediately."
     )
     call_url = f"http://api.callmebot.com/start.php?user={CALLMEBOT_USER}&text={call_msg}&lang=en-US-Standard-C&rpt=2"
     try:
@@ -43,55 +42,69 @@ def send_alerts(status_info):
 def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        context = browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        )
+        page = context.new_page()
 
         try:
             # 1. Login Page
             print("[*] Loading login page...")
             page.goto(
                 "https://alexreg.aast.edu/aastreg/frm_login.aspx",
-                wait_until="domcontentloaded",
+                wait_until="networkidle",
                 timeout=30000,
             )
 
-            # Fill credentials
+            # Wait for fields to exist
             page.wait_for_selector(
                 "#ctl00_ContentPlaceHolder1_UserName", timeout=15000
             )
+
+            # Fill credentials
             page.locator("#ctl00_ContentPlaceHolder1_UserName").fill(REG_NUMBER)
             page.locator("#ctl00_ContentPlaceHolder1_Password").fill(PIN)
+            page.wait_for_timeout(1000)
 
-            # Submit login
+            # Submit Login using the exact input[type='image'] ID
             print("[*] Submitting login...")
-            page.locator(
-                "#ctl00_ContentPlaceHolder1_btn_login, a:has-text('Login'),"
-                " input[value='Login']"
-            ).first.click()
+            login_btn = page.locator("#ctl00_ContentPlaceHolder1_btn_login")
+
+            with page.expect_navigation(
+                wait_until="domcontentloaded", timeout=30000
+            ):
+                try:
+                    login_btn.click(timeout=5000)
+                except Exception:
+                    # Fallback directly triggering the postback onclick handler
+                    login_btn.evaluate("el => el.click()")
 
             # 2. Choice Page -> Click "REGISTER MAJOR"
-            print("[*] Waiting for frm_choice.aspx...")
-            page.wait_for_url("**/frm_choice.aspx", timeout=25000)
+            print(f"[*] Landed on: {page.url}")
             page.wait_for_selector(
-                "#ctl00_ContentPlaceHolder1_l_major", timeout=15000
+                "#ctl00_ContentPlaceHolder1_l_major", timeout=20000
             )
-            page.locator("#ctl00_ContentPlaceHolder1_l_major").click()
+
+            with page.expect_navigation(
+                wait_until="domcontentloaded", timeout=30000
+            ):
+                page.locator("#ctl00_ContentPlaceHolder1_l_major").click()
 
             # 3. Menu Page -> Click "Online Registration"
-            print("[*] Waiting for frm_Menu.aspx...")
-            page.wait_for_url("**/frm_Menu.aspx", timeout=25000)
+            print(f"[*] Landed on: {page.url}")
             page.wait_for_selector(
-                "#ctl00_ContentPlaceHolder1_Lbtn_Reg", timeout=15000
+                "#ctl00_ContentPlaceHolder1_Lbtn_Reg", timeout=20000
             )
             page.locator("#ctl00_ContentPlaceHolder1_Lbtn_Reg").click()
 
-            # Brief wait for postback/DOM update
-            page.wait_for_timeout(3500)
+            # Wait for ASP.NET partial update / postback
+            page.wait_for_timeout(4000)
 
-            # 4. Evaluation
+            # 4. Check status
             current_url = page.url
             body_text = page.inner_text("body")
 
-            # Check if red error message exists
             lbl_msg_locator = page.locator("#ctl00_ContentPlaceHolder1_lbl_msg")
             error_text = ""
             if lbl_msg_locator.count() > 0:
@@ -104,10 +117,9 @@ def main():
                 or "لا يسمح بالتسجيل" in body_text
             )
 
-            # Open if navigated away from frm_Menu OR the block text is absent
             if "frm_Menu.aspx" not in current_url or not is_blocked:
                 print("[!] REGISTRATION IS OPEN!")
-                send_alerts(f"Navigated to {current_url}")
+                send_alerts(f"Navigated to: {current_url}")
             else:
                 print(
                     f"[-] Closed: '{error_text.strip() or 'لا يسمح بالتسجيل'}'"
@@ -116,6 +128,11 @@ def main():
 
         except Exception as err:
             print(f"[!] Error during execution: {err}")
+            try:
+                page.screenshot(path="debugcheck.png", full_page=True)
+                print("[+] Saved debugcheck.png")
+            except Exception as ss_err:
+                print(f"[!] Screenshot capture failed: {ss_err}")
             sys.exit(1)
         finally:
             browser.close()
