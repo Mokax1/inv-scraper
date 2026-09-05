@@ -19,6 +19,9 @@ TWILIO_API_SECRET = os.environ.get("TWILIO_API_SECRET")
 TWILIO_FROM = os.environ.get("TWILIO_FROM_NUMBER")
 MY_PHONE = os.environ.get("MY_PHONE_NUMBER")
 
+# Hosted TwiML Bin URL
+TWIML_BIN_URL = "https://handler.twilio.com/twiml/EH2af47328c7adc64103b682b874c70070"
+
 
 def send_alerts(status_info):
     # 1. Telegram Text Notification (CallMeBot)
@@ -40,10 +43,7 @@ def send_alerts(status_info):
         try:
             client = Client(TWILIO_API_KEY, TWILIO_API_SECRET, TWILIO_ACCOUNT_SID)
             call = client.calls.create(
-                twiml=(
-                    '<Response><Say loop="3">Attention Mo! AAST course registration is now open. '
-                    'Log in and pick your courses immediately.</Say></Response>'
-                ),
+                url=TWIML_BIN_URL,
                 to=MY_PHONE,
                 from_=TWILIO_FROM,
             )
@@ -131,7 +131,9 @@ def main():
                 or "لا يسمح بالتسجيل" in body_text
             )
 
-            # NOTE FOR TESTING: Flip condition to `if is_blocked:` to force an immediate test call.
+            # Currently set to `if is_blocked:` for your live test call.
+            # Once your phone rings, change this line back to:
+            # if "frm_Menu.aspx" not in current_url or not is_blocked:
             if is_blocked:
                 print("[!] REGISTRATION IS OPEN!")
                 send_alerts(f"Navigated to: {current_url}")
