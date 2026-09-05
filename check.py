@@ -134,7 +134,7 @@ def main():
             # Currently set to `if is_blocked:` for your live test call.
             # Once your phone rings, change this line back to:
             # if "frm_Menu.aspx" not in current_url or not is_blocked:
-            if is_blocked:
+            if "frm_Menu.aspx" not in current_url or not is_blocked:
                 print("[!] REGISTRATION IS OPEN!")
                 send_alerts(f"Navigated to: {current_url}")
             else:
