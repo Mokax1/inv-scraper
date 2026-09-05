@@ -21,7 +21,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install playwright requests
+          pip install playwright requests twilio
           playwright install --with-deps chromium
 
       - name: Run checker
@@ -29,4 +29,17 @@ jobs:
           AAST_REG_NUM: ${{ secrets.AAST_REG_NUM }}
           AAST_PIN: ${{ secrets.AAST_PIN }}
           CALLMEBOT_USER: ${{ secrets.CALLMEBOT_USER }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_API_KEY: ${{ secrets.TWILIO_API_KEY }}
+          TWILIO_API_SECRET: ${{ secrets.TWILIO_API_SECRET }}
+          TWILIO_FROM_NUMBER: ${{ secrets.TWILIO_FROM_NUMBER }}
+          MY_PHONE_NUMBER: ${{ secrets.MY_PHONE_NUMBER }}
         run: python check.py
+
+      - name: Upload Debug Screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debugcheck-screenshot
+          path: debugcheck.png
+          if-no-files-found: ignore
