@@ -1,0 +1,32 @@
+name: Check Registration
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check-portal:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: registration-checker
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install playwright requests
+          playwright install --with-deps chromium
+
+      - name: Run checker
+        env:
+          AAST_REG_NUM: ${{ secrets.AAST_REG_NUM }}
+          AAST_PIN: ${{ secrets.AAST_PIN }}
+          CALLMEBOT_USER: ${{ secrets.CALLMEBOT_USER }}
+        run: python check.py
