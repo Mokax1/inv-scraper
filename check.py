@@ -131,7 +131,7 @@ def main():
                 or "لا يسمح بالتسجيل" in body_text
             )
 
-            if "frm_Menu.aspx" not in current_url or not is_blocked:
+            if is_blocked:
                 print("[!] REGISTRATION IS OPEN!")
                 send_alerts(f"Navigated to: {current_url}")
             else:
