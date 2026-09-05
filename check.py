@@ -29,7 +29,8 @@ def send_alerts(status_info):
 
     # 2. Telegram Voice Call
     call_msg = urllib.parse.quote(
-        "AAST registration is now open! Log in and pick your courses immediately."
+        "AAST registration is now open! Log in and pick your courses"
+        " immediately."
     )
     call_url = f"http://api.callmebot.com/start.php?user={CALLMEBOT_USER}&text={call_msg}&lang=en-US-Standard-C&rpt=2"
     try:
@@ -44,7 +45,10 @@ def main():
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                " (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
         )
         page = context.new_page()
 
@@ -77,26 +81,36 @@ def main():
                 try:
                     login_btn.click(timeout=5000)
                 except Exception:
-                    # Fallback directly triggering the postback onclick handler
                     login_btn.evaluate("el => el.click()")
 
             # 2. Choice Page -> Click "REGISTER MAJOR"
             print(f"[*] Landed on: {page.url}")
-            page.wait_for_selector(
-                "#ctl00_ContentPlaceHolder1_l_major", timeout=20000
-            )
+            major_locator = page.locator(
+                "#ctl00_ContentPlaceHolder1_l_major, a:has-text('REGISTER"
+                " MAJOR')"
+            ).first
+            major_locator.wait_for(state="attached", timeout=20000)
 
             with page.expect_navigation(
                 wait_until="domcontentloaded", timeout=30000
             ):
-                page.locator("#ctl00_ContentPlaceHolder1_l_major").click()
+                try:
+                    major_locator.click(force=True, timeout=5000)
+                except Exception:
+                    major_locator.evaluate("el => el.click()")
 
             # 3. Menu Page -> Click "Online Registration"
             print(f"[*] Landed on: {page.url}")
-            page.wait_for_selector(
-                "#ctl00_ContentPlaceHolder1_Lbtn_Reg", timeout=20000
-            )
-            page.locator("#ctl00_ContentPlaceHolder1_Lbtn_Reg").click()
+            reg_locator = page.locator(
+                "#ctl00_ContentPlaceHolder1_Lbtn_Reg,"
+                " a:has-text('Online Registration')"
+            ).first
+            reg_locator.wait_for(state="attached", timeout=20000)
+
+            try:
+                reg_locator.click(force=True, timeout=5000)
+            except Exception:
+                reg_locator.evaluate("el => el.click()")
 
             # Wait for ASP.NET partial update / postback
             page.wait_for_timeout(4000)
