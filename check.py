@@ -23,20 +23,15 @@ MY_PHONE = os.environ.get("MY_PHONE_NUMBER")
 TWIML_BIN_URL = "https://handler.twilio.com/twiml/EH2af47328c7adc64103b682b874c70070"
 
 # Target Course Groups (ignoring Leadership and PE)
-# Normalized format: (Code -> Group Letter/Number)
+# Format: Course Code -> (Group Number, Group Letter)
 TARGET_GROUPS = {
-    "BS203": "11K",   # Maritime Culture & Leadership
-    "BS261": "02B",   # Ship Compasses & Auto Pilot
-    "BS292": "06H",   # Maritime Law & IMO Conventions
-    "BS213": "10J",   # Watch Keeping & Marine Communication
-    "BS234": "04D",   # Terrestrial Navigation part II
-    "BS222": "10K",   # Ship Stability
+    "BS203": ("11", "K"),   # Maritime Culture & Leadership
+    "BS261": ("02", "B"),   # Ship Compasses & Auto Pilot
+    "BS292": ("06", "H"),   # Maritime Law & IMO Conventions
+    "BS213": ("10", "J"),   # Watch Keeping & Marine Communication
+    "BS234": ("04", "D"),   # Terrestrial Navigation part II
+    "BS222": ("10", "K"),   # Ship Stability
 }
-
-
-def clean_str(val: str) -> str:
-    """Removes spaces, hyphens, and asterisks for robust comparisons."""
-    return val.replace(" ", "").replace("-", "").replace("*", "").upper()
 
 
 def send_telegram_status(available_slots):
@@ -153,10 +148,8 @@ def main():
             page.wait_for_timeout(4000)
 
             # 4. Handle Navigation to Registration Grid
-            # Check if grid is ALREADY present on screen
             grid_locator = page.locator("#ctl00_ContentPlaceHolder1_grdvw_courses")
             if grid_locator.count() == 0:
-                # If grid is not yet rendered, check for "Change Registered Courses" button
                 change_reg_btn = page.locator(
                     "#ctl00_ContentPlaceHolder1_lbtn_changeReg, a:has-text('Change Registered Courses')"
                 ).first
@@ -168,49 +161,96 @@ def main():
                         change_reg_btn.evaluate("el => el.click()")
                     page.wait_for_timeout(4000)
 
-            # Wait for course table
             print(f"[*] On registration view: {page.url}")
             page.wait_for_selector("#ctl00_ContentPlaceHolder1_grdvw_courses", timeout=20000)
 
-            # 5. Scan Course Table Rows
-            rows = page.locator("#ctl00_ContentPlaceHolder1_grdvw_courses tr")
-            total_rows = rows.count()
-            print(f"[*] Scanning {total_rows} table rows...")
+            # 5. Native Browser Evaluation to Extract and Match Exact Options
+            print("[*] Extracting course rows directly from DOM...")
+            course_data = page.evaluate("""() => {
+                const table = document.querySelector("#ctl00_ContentPlaceHolder1_grdvw_courses");
+                if (!table) return [];
+                
+                const rows = Array.from(table.querySelectorAll("tr"));
+                const result = [];
+                
+                // Skip header row
+                for (let i = 1; i < rows.length; i++) {
+                    const cells = rows[i].querySelectorAll("td");
+                    if (cells.length < 8) continue;
+                    
+                    const code = cells[0].innerText.trim();
+                    const groupNum = cells[5].innerText.trim();
+                    const groupLetter = cells[6].innerText.trim();
+                    
+                    const select = cells[7].querySelector("select");
+                    let options = [];
+                    let selectedText = "";
+                    
+                    if (select) {
+                        options = Array.from(select.options).map(o => o.text.trim());
+                        selectedText = select.options[select.selectedIndex] ? select.options[select.selectedIndex].text.trim() : "";
+                    }
+                    
+                    result.push({
+                        code: code,
+                        currentGroupNum: groupNum,
+                        currentGroupLetter: groupLetter,
+                        selectedText: selectedText,
+                        options: options
+                    });
+                }
+                return result;
+            }""")
 
             available_target_slots = {}
 
-            for i in range(1, total_rows):
-                row = rows.nth(i)
-                cells = row.locator("td")
-                if cells.count() < 2:
-                    continue
-
-                raw_code = cells.nth(0).inner_text().strip()
-                cleaned_row_code = clean_str(raw_code)
-
-                # Match against target courses
-                matched_target = None
+            for item in course_data:
+                raw_code = item["code"].replace("*", "").strip()
+                
+                # Check if this row is one of our target courses
+                matched_target_code = None
                 for target_code in TARGET_GROUPS.keys():
-                    if clean_str(target_code) in cleaned_row_code:
-                        matched_target = target_code
+                    if target_code in raw_code:
+                        matched_target_code = target_code
                         break
 
-                if matched_target:
-                    target_group = TARGET_GROUPS[matched_target]  # e.g., "11K"
-                    dropdown = row.locator("select[id*='drp_cls']")
+                if matched_target_code:
+                    req_num, req_letter = TARGET_GROUPS[matched_target_code]
+                    req_num_unpadded = req_num.lstrip("0")
+                    
+                    options = item["options"]
+                    selected_text = item["selectedText"]
+                    curr_num = item["currentGroupNum"]
+                    curr_letter = item["currentGroupLetter"]
 
-                    if dropdown.count() > 0:
-                        options = dropdown.locator("option").all_inner_texts()
-                        cleaned_opts = [clean_str(opt) for opt in options]
+                    print(f"\n[*] Course: {matched_target_code} (Target: {req_num}-{req_letter})")
+                    print(f"    Current Row Display: Group {curr_num} {curr_letter}")
+                    print(f"    Selected in Dropdown: '{selected_text}'")
+                    print(f"    Available Options in Dropdown: {options}")
 
-                        print(f"[*] {matched_target}: looking for '{target_group}' in options -> {options}")
+                    # 1. Check if the course is already currently assigned to this target group
+                    is_currently_enrolled = (
+                        (curr_num == req_num or curr_num == req_num_unpadded) and 
+                        (curr_letter.upper() == req_letter.upper())
+                    )
 
-                        # Check if target group appears in any of the available options
-                        if any(target_group in opt for opt in cleaned_opts):
-                            print(f"[!] Target group {target_group} is AVAILABLE for {matched_target}!")
-                            available_target_slots[matched_target] = target_group
-                        else:
-                            print(f"[-] Target group {target_group} not in available list for {matched_target}.")
+                    # 2. Check if the target section is present in the dropdown options
+                    is_in_dropdown = False
+                    for opt in options:
+                        opt_upper = opt.upper()
+                        # Matches patterns like "11 -K", "11-K", "11 K", or "11 - K"
+                        has_num = req_num in opt_upper or req_num_unpadded in opt_upper
+                        has_letter = f"-{req_letter}" in opt_upper or f" {req_letter}" in opt_upper or f"- {req_letter}" in opt_upper
+                        if has_num and has_letter:
+                            is_in_dropdown = True
+                            break
+
+                    if is_currently_enrolled or is_in_dropdown:
+                        display_str = f"{req_num}-{req_letter}"
+                        print(f"    => [MATCH FOUND] Section {display_str} is available!")
+                        available_target_slots[matched_target_code] = display_str
+                    else:
+                        print(f"    => [NOT FOUND] Section {req_num}-{req_letter} is full.")
 
             # 6. Notifications
             # Text update every run with breakdown
@@ -221,7 +261,7 @@ def main():
                 print("[!] ALL 6/6 SECTIONS OPEN! Triggering cellular call...")
                 make_twilio_call()
             else:
-                print(f"[i] Status: {len(available_target_slots)}/{len(TARGET_GROUPS)} available. No call needed yet.")
+                print(f"\n[i] Status: {len(available_target_slots)}/{len(TARGET_GROUPS)} available. No call needed yet.")
 
         except Exception as err:
             print(f"[!] Error during execution: {err}")
