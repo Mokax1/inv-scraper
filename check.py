@@ -22,15 +22,15 @@ MY_PHONE = os.environ.get("MY_PHONE_NUMBER")
 # Hosted TwiML Bin URL
 TWIML_BIN_URL = "https://handler.twilio.com/twiml/EH2af47328c7adc64103b682b874c70070"
 
-# Target Course Groups (ignoring Leadership and PE)
-# Format: Course Code -> (Group Number, Group Letter)
-TARGET_GROUPS = {
-    "BS203": ("11", "K"),   # Maritime Culture & Leadership
-    "BS261": ("02", "B"),   # Ship Compasses & Auto Pilot
-    "BS292": ("06", "H"),   # Maritime Law & IMO Conventions
-    "BS213": ("10", "J"),   # Watch Keeping & Marine Communication
-    "BS234": ("04", "D"),   # Terrestrial Navigation part II
-    "BS222": ("10", "K"),   # Ship Stability
+# Target Course Dropdown Mapping:
+# Selector ID -> (Course Name, Target Group Number, Target Letter Value)
+TARGET_MAP = {
+    "ctl00_ContentPlaceHolder1_grdvw_courses_ctl04_drp_cls": ("BS292 Maritime Law", "06", "H"),
+    "ctl00_ContentPlaceHolder1_grdvw_courses_ctl05_drp_cls": ("BS203 Maritime Culture", "11", "K"),
+    "ctl00_ContentPlaceHolder1_grdvw_courses_ctl06_drp_cls": ("BS234 Terr Navigation", "04", "D"),
+    "ctl00_ContentPlaceHolder1_grdvw_courses_ctl07_drp_cls": ("BS213 Watch Keeping", "10", "J"),
+    "ctl00_ContentPlaceHolder1_grdvw_courses_ctl08_drp_cls": ("BS222 Ship Stability", "10", "K"),
+    "ctl00_ContentPlaceHolder1_grdvw_courses_ctl09_drp_cls": ("BS261 Ship Compasses", "02", "B"),
 }
 
 
@@ -39,7 +39,7 @@ def send_telegram_status(available_slots):
         print("[!] CALLMEBOT_USER secret is missing.")
         return
 
-    total = len(TARGET_GROUPS)
+    total = len(TARGET_MAP)
     matched_count = len(available_slots)
 
     if matched_count == total:
@@ -50,7 +50,7 @@ def send_telegram_status(available_slots):
         header = f"📊 Registration Update: 0/{total} Target Groups Open"
 
     if matched_count > 0:
-        lines = [f"• {code}: Group {grp}" for code, grp in available_slots.items()]
+        lines = [f"• {name}: Group {grp}" for name, grp in available_slots.items()]
         body = "\n".join(lines)
     else:
         body = "None of your desired sections have open seats yet."
@@ -164,104 +164,62 @@ def main():
             print(f"[*] On registration view: {page.url}")
             page.wait_for_selector("#ctl00_ContentPlaceHolder1_grdvw_courses", timeout=20000)
 
-            # 5. Native Browser Evaluation to Extract and Match Exact Options
-            print("[*] Extracting course rows directly from DOM...")
-            course_data = page.evaluate("""() => {
-                const table = document.querySelector("#ctl00_ContentPlaceHolder1_grdvw_courses");
-                if (!table) return [];
-                
-                const rows = Array.from(table.querySelectorAll("tr"));
-                const result = [];
-                
-                // Skip header row
-                for (let i = 1; i < rows.length; i++) {
-                    const cells = rows[i].querySelectorAll("td");
-                    if (cells.length < 8) continue;
-                    
-                    const code = cells[0].innerText.trim();
-                    const groupNum = cells[5].innerText.trim();
-                    const groupLetter = cells[6].innerText.trim();
-                    
-                    const select = cells[7].querySelector("select");
-                    let options = [];
-                    let selectedText = "";
-                    
-                    if (select) {
-                        options = Array.from(select.options).map(o => o.text.trim());
-                        selectedText = select.options[select.selectedIndex] ? select.options[select.selectedIndex].text.trim() : "";
-                    }
-                    
-                    result.push({
-                        code: code,
-                        currentGroupNum: groupNum,
-                        currentGroupLetter: groupLetter,
-                        selectedText: selectedText,
-                        options: options
-                    });
-                }
-                return result;
-            }""")
-
+            # 5. Direct Selector Check
             available_target_slots = {}
 
-            for item in course_data:
-                raw_code = item["code"].replace("*", "").strip()
+            print("\n[*] Inspecting target course dropdowns...")
+            for element_id, (course_name, req_num, req_letter) in TARGET_MAP.items():
+                select_locator = page.locator(f"#{element_id}")
                 
-                # Check if this row is one of our target courses
-                matched_target_code = None
-                for target_code in TARGET_GROUPS.keys():
-                    if target_code in raw_code:
-                        matched_target_code = target_code
+                if select_locator.count() == 0:
+                    print(f"[-] Dropdown #{element_id} not found on page.")
+                    continue
+
+                # Query options directly from this dropdown element
+                options_data = select_locator.evaluate("""el => {
+                    return Array.from(el.options).map(opt => ({
+                        value: opt.value ? opt.value.trim().toUpperCase() : "",
+                        text: opt.text ? opt.text.trim().toUpperCase() : ""
+                    }));
+                }""")
+
+                req_target_display = f"{req_num}-{req_letter}"
+                unpadded_num = req_num.lstrip("0")
+
+                is_available = False
+                matched_option_text = ""
+
+                for opt in options_data:
+                    val = opt["value"]
+                    txt = opt["text"]
+
+                    # Check if letter matches value and number exists in text
+                    matches_val = (val == req_letter.upper())
+                    matches_num = (req_num in txt) or (unpadded_num in txt)
+
+                    if matches_val and matches_num:
+                        is_available = True
+                        matched_option_text = txt
                         break
 
-                if matched_target_code:
-                    req_num, req_letter = TARGET_GROUPS[matched_target_code]
-                    req_num_unpadded = req_num.lstrip("0")
-                    
-                    options = item["options"]
-                    selected_text = item["selectedText"]
-                    curr_num = item["currentGroupNum"]
-                    curr_letter = item["currentGroupLetter"]
+                all_texts = [o["text"] for o in options_data]
+                print(f"[*] {course_name} (Target: {req_target_display}):")
+                print(f"    Options available: {all_texts}")
 
-                    print(f"\n[*] Course: {matched_target_code} (Target: {req_num}-{req_letter})")
-                    print(f"    Current Row Display: Group {curr_num} {curr_letter}")
-                    print(f"    Selected in Dropdown: '{selected_text}'")
-                    print(f"    Available Options in Dropdown: {options}")
-
-                    # 1. Check if the course is already currently assigned to this target group
-                    is_currently_enrolled = (
-                        (curr_num == req_num or curr_num == req_num_unpadded) and 
-                        (curr_letter.upper() == req_letter.upper())
-                    )
-
-                    # 2. Check if the target section is present in the dropdown options
-                    is_in_dropdown = False
-                    for opt in options:
-                        opt_upper = opt.upper()
-                        # Matches patterns like "11 -K", "11-K", "11 K", or "11 - K"
-                        has_num = req_num in opt_upper or req_num_unpadded in opt_upper
-                        has_letter = f"-{req_letter}" in opt_upper or f" {req_letter}" in opt_upper or f"- {req_letter}" in opt_upper
-                        if has_num and has_letter:
-                            is_in_dropdown = True
-                            break
-
-                    if is_currently_enrolled or is_in_dropdown:
-                        display_str = f"{req_num}-{req_letter}"
-                        print(f"    => [MATCH FOUND] Section {display_str} is available!")
-                        available_target_slots[matched_target_code] = display_str
-                    else:
-                        print(f"    => [NOT FOUND] Section {req_num}-{req_letter} is full.")
+                if is_available:
+                    print(f"    => [MATCH FOUND] {matched_option_text}")
+                    available_target_slots[course_name] = req_target_display
+                else:
+                    print(f"    => [FULL] Target {req_target_display} not available.")
 
             # 6. Notifications
-            # Text update every run with breakdown
             send_telegram_status(available_target_slots)
 
-            # Voice call ONLY when all 6 sections are open simultaneously
-            if len(available_target_slots) == len(TARGET_GROUPS):
+            if len(available_target_slots) == len(TARGET_MAP):
                 print("[!] ALL 6/6 SECTIONS OPEN! Triggering cellular call...")
                 make_twilio_call()
             else:
-                print(f"\n[i] Status: {len(available_target_slots)}/{len(TARGET_GROUPS)} available. No call needed yet.")
+                print(f"\n[i] Status: {len(available_target_slots)}/{len(TARGET_MAP)} available. No call needed yet.")
 
         except Exception as err:
             print(f"[!] Error during execution: {err}")
