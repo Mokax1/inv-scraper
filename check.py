@@ -22,15 +22,14 @@ MY_PHONE = os.environ.get("MY_PHONE_NUMBER")
 # Hosted TwiML Bin URL
 TWIML_BIN_URL = "https://handler.twilio.com/twiml/EH2af47328c7adc64103b682b874c70070"
 
-# Target Course Dropdown Mapping:
-# Selector ID -> (Course Name, Target Group Number, Target Letter Value)
-TARGET_MAP = {
-    "ctl00_ContentPlaceHolder1_grdvw_courses_ctl04_drp_cls": ("BS292 Maritime Law", "06", "H"),
-    "ctl00_ContentPlaceHolder1_grdvw_courses_ctl05_drp_cls": ("BS203 Maritime Culture", "11", "K"),
-    "ctl00_ContentPlaceHolder1_grdvw_courses_ctl06_drp_cls": ("BS234 Terr Navigation", "04", "D"),
-    "ctl00_ContentPlaceHolder1_grdvw_courses_ctl07_drp_cls": ("BS213 Watch Keeping", "10", "J"),
-    "ctl00_ContentPlaceHolder1_grdvw_courses_ctl08_drp_cls": ("BS222 Ship Stability", "10", "K"),
-    "ctl00_ContentPlaceHolder1_grdvw_courses_ctl09_drp_cls": ("BS261 Ship Compasses", "02", "B"),
+# Target Course Subject Names & Corresponding Target Sections
+TARGET_COURSES = {
+    "Maritime Law & IMO Conventions": ("06", "H"),
+    "Maritime Culture & Leadership": ("11", "K"),
+    "Terrestrial Navigation part II": ("04", "D"),
+    "Watch Keeping & Marine Communication": ("10", "J"),
+    "Ship Stability": ("10", "K"),
+    "Ship Compasses & Auto Pilot": ("02", "B"),
 }
 
 
@@ -39,7 +38,7 @@ def send_telegram_status(available_slots):
         print("[!] CALLMEBOT_USER secret is missing.")
         return
 
-    total = len(TARGET_MAP)
+    total = len(TARGET_COURSES)
     matched_count = len(available_slots)
 
     if matched_count == total:
@@ -53,7 +52,7 @@ def send_telegram_status(available_slots):
         lines = [f"• {name}: Group {grp}" for name, grp in available_slots.items()]
         body = "\n".join(lines)
     else:
-        body = "None of your desired sections have open seats yet."
+        body = "None of your target groups are open yet."
 
     message = (
         f"{header}\n\n"
@@ -162,64 +161,60 @@ def main():
                     page.wait_for_timeout(4000)
 
             print(f"[*] On registration view: {page.url}")
-            page.wait_for_selector("#ctl00_ContentPlaceHolder1_grdvw_courses", timeout=20000)
+            page.wait_for_selector("#ctl00_ContentPlaceHolder1_grdvw_courses select", timeout=20000)
+            page.wait_for_timeout(2000)
 
-            # 5. Direct Selector Check
+            # 5. Direct Selector Check using Row Parent Text
             available_target_slots = {}
+            print("\n[*] Inspecting courses by Subject Name...")
 
-            print("\n[*] Inspecting target course dropdowns...")
-            for element_id, (course_name, req_num, req_letter) in TARGET_MAP.items():
-                select_locator = page.locator(f"#{element_id}")
-                
-                if select_locator.count() == 0:
-                    print(f"[-] Dropdown #{element_id} not found on page.")
+            for subject_name, (target_num, target_letter) in TARGET_COURSES.items():
+                target_str = f"{target_num}-{target_letter}"
+                unpadded_num = target_num.lstrip("0")
+
+                # Locate the specific row that contains this subject's exact td text
+                row_selector = f"#ctl00_ContentPlaceHolder1_grdvw_courses tr:has(td:has-text('{subject_name}'))"
+                row = page.locator(row_selector).first
+
+                if row.count() == 0:
+                    print(f"[-] Row for '{subject_name}' was not found.")
                     continue
 
-                # Query options directly from this dropdown element
-                options_data = select_locator.evaluate("""el => {
-                    return Array.from(el.options).map(opt => ({
-                        value: opt.value ? opt.value.trim().toUpperCase() : "",
-                        text: opt.text ? opt.text.trim().toUpperCase() : ""
-                    }));
-                }""")
+                select_box = row.locator("select").first
+                if select_box.count() == 0:
+                    print(f"[-] Dropdown in row for '{subject_name}' not found.")
+                    continue
 
-                req_target_display = f"{req_num}-{req_letter}"
-                unpadded_num = req_num.lstrip("0")
+                # Read all option texts directly
+                options = select_box.locator("option").all_inner_texts()
+                print(f"[*] {subject_name} (Target: {target_str}):")
+                print(f"    Available Dropdown Options -> {options}")
 
                 is_available = False
-                matched_option_text = ""
-
-                for opt in options_data:
-                    val = opt["value"]
-                    txt = opt["text"]
-
-                    # Check if letter matches value and number exists in text
-                    matches_val = (val == req_letter.upper())
-                    matches_num = (req_num in txt) or (unpadded_num in txt)
-
-                    if matches_val and matches_num:
+                for opt in options:
+                    opt_upper = opt.upper()
+                    # Check both padded (e.g., "02") and unpadded ("2") with target letter ("B")
+                    has_num = target_num in opt_upper or unpadded_num in opt_upper
+                    has_letter = target_letter.upper() in opt_upper
+                    if has_num and has_letter:
                         is_available = True
-                        matched_option_text = txt
                         break
 
-                all_texts = [o["text"] for o in options_data]
-                print(f"[*] {course_name} (Target: {req_target_display}):")
-                print(f"    Options available: {all_texts}")
-
                 if is_available:
-                    print(f"    => [MATCH FOUND] {matched_option_text}")
-                    available_target_slots[course_name] = req_target_display
+                    print(f"    => [MATCH] Found slot for {target_str}!")
+                    available_target_slots[subject_name] = target_str
                 else:
-                    print(f"    => [FULL] Target {req_target_display} not available.")
+                    print(f"    => [UNAVAILABLE] {target_str} not in dropdown.")
 
             # 6. Notifications
             send_telegram_status(available_target_slots)
 
-            if len(available_target_slots) == len(TARGET_MAP):
-                print("[!] ALL 6/6 SECTIONS OPEN! Triggering cellular call...")
+            # Trigger Twilio voice call when all 6 match
+            if len(available_target_slots) == len(TARGET_COURSES):
+                print("[!] ALL 6/6 TARGET SLOTS AVAILABLE! Placing Twilio phone call...")
                 make_twilio_call()
             else:
-                print(f"\n[i] Status: {len(available_target_slots)}/{len(TARGET_MAP)} available. No call needed yet.")
+                print(f"\n[i] Status: {len(available_target_slots)}/{len(TARGET_COURSES)} available.")
 
         except Exception as err:
             print(f"[!] Error during execution: {err}")
