@@ -22,7 +22,7 @@ MY_PHONE = os.environ.get("MY_PHONE_NUMBER")
 # Hosted TwiML Bin URL
 TWIML_BIN_URL = "https://handler.twilio.com/twiml/EH2af47328c7adc64103b682b874c70070"
 
-# Target Course Subject Names & Corresponding Target Sections
+# Target Courses & Group Codes
 TARGET_COURSES = {
     "Maritime Law & IMO Conventions": ("06", "H"),
     "Maritime Culture & Leadership": ("11", "K"),
@@ -143,28 +143,33 @@ def main():
             except Exception:
                 reg_locator.evaluate("el => el.click()")
 
-            # Wait for DOM transition/render
             page.wait_for_timeout(4000)
 
-            # 4. Handle Navigation to Registration Grid
-            grid_locator = page.locator("#ctl00_ContentPlaceHolder1_grdvw_courses")
-            if grid_locator.count() == 0:
-                change_reg_btn = page.locator(
-                    "#ctl00_ContentPlaceHolder1_lbtn_changeReg, a:has-text('Change Registered Courses')"
-                ).first
-                if change_reg_btn.is_visible():
-                    print("[*] Clicking 'Change Registered Courses' button...")
-                    try:
-                        change_reg_btn.click(force=True, timeout=5000)
-                    except Exception:
-                        change_reg_btn.evaluate("el => el.click()")
-                    page.wait_for_timeout(4000)
+            # 4. Explicitly Click "Change Registered Courses" to unlock dropdowns
+            print("[*] Checking for 'Change Registered Courses' button...")
+            change_reg_btn = page.locator(
+                "#ctl00_ContentPlaceHolder1_lbtn_changeReg, a:has-text('Change Registered Courses')"
+            ).first
 
-            print(f"[*] On registration view: {page.url}")
-            page.wait_for_selector("#ctl00_ContentPlaceHolder1_grdvw_courses select", timeout=20000)
+            # Wait for button to be available
+            change_reg_btn.wait_for(state="attached", timeout=15000)
+            print("[*] Clicking 'Change Registered Courses' to switch table to editable mode...")
+            
+            try:
+                change_reg_btn.click(force=True, timeout=5000)
+            except Exception:
+                change_reg_btn.evaluate("el => el.click()")
+
+            # 5. Wait for the editable dropdowns to actually render inside the table
+            print("[*] Waiting for dropdowns (<select>) to populate...")
+            page.wait_for_selector(
+                "#ctl00_ContentPlaceHolder1_grdvw_courses select", 
+                state="visible", 
+                timeout=25000
+            )
             page.wait_for_timeout(2000)
 
-            # 5. Direct Selector Check using Row Parent Text
+            # 6. Direct Selector Check using Row Parent Text
             available_target_slots = {}
             print("\n[*] Inspecting courses by Subject Name...")
 
@@ -193,7 +198,7 @@ def main():
                 is_available = False
                 for opt in options:
                     opt_upper = opt.upper()
-                    # Check both padded (e.g., "02") and unpadded ("2") with target letter ("B")
+                    # Check both padded ("02") and unpadded ("2") alongside target letter ("B")
                     has_num = target_num in opt_upper or unpadded_num in opt_upper
                     has_letter = target_letter.upper() in opt_upper
                     if has_num and has_letter:
@@ -206,7 +211,7 @@ def main():
                 else:
                     print(f"    => [UNAVAILABLE] {target_str} not in dropdown.")
 
-            # 6. Notifications
+            # 7. Notifications
             send_telegram_status(available_target_slots)
 
             # Trigger Twilio voice call when all 6 match
