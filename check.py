@@ -144,14 +144,23 @@ def main():
             except Exception:
                 change_reg_btn.evaluate("el => el.click()")
 
-            # Wait for the editable controls to render
+            # SCREENSHOT 1: Immediately after clicking Change Registered Courses
+            page.wait_for_timeout(3000)
+            page.screenshot(path="step1_after_change_reg.png", full_page=True)
+            print("[+] Saved step1_after_change_reg.png")
+
+            # Wait for editable dropdowns to render
             print("[*] Waiting for table controls...")
             page.wait_for_selector(
                 "#ctl00_ContentPlaceHolder1_grdvw_courses select",
                 state="visible",
                 timeout=25000,
             )
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(1000)
+
+            # SCREENSHOT 2: Editable course table visible with dropdowns active
+            page.screenshot(path="step2_editable_table.png", full_page=True)
+            print("[+] Saved step2_editable_table.png")
 
             available_target_slots = {}
 
@@ -190,8 +199,12 @@ def main():
             print("[*] Selecting 'Maritime Law & IMO Conventions' from #ctl00_ContentPlaceHolder1_ddl_crsname...")
             course_ddl.select_option(label="Maritime Law & IMO Conventions              (BS292*    )")
 
-            # Wait 2 seconds for the ASP.NET postback to reload the group dropdown
+            # Wait 2 seconds for ASP.NET postback to reload group dropdown
             page.wait_for_timeout(2000)
+
+            # SCREENSHOT 3: After choosing Maritime Law and triggering postback
+            page.screenshot(path="step3_maritime_law_selected.png", full_page=True)
+            print("[+] Saved step3_maritime_law_selected.png")
 
             # Inspect group dropdown
             grp_ddl = page.locator("#ctl00_ContentPlaceHolder1_ddl_grp")
@@ -202,7 +215,6 @@ def main():
 
             for opt in grp_options:
                 opt_upper = opt.upper()
-                # Matches "08" or "8" alongside "H"
                 has_num = ("08" in opt_upper) or (" 8 " in opt_upper) or ("8 -" in opt_upper)
                 has_letter = "H" in opt_upper
                 if has_num and has_letter:
@@ -213,12 +225,16 @@ def main():
             if "Maritime Law" not in available_target_slots:
                 print("    => [UNAVAILABLE] 08-H not in Maritime Law group options.")
 
+            # SCREENSHOT 4: Final inspected state
+            page.screenshot(path="step4_final_check_state.png", full_page=True)
+            print("[+] Saved step4_final_check_state.png")
+
             # =========================================================================
             # Notifications & Trigger
             # =========================================================================
             send_telegram_status(available_target_slots)
 
-            # Trigger cellular call if AT LEAST ONE of the two target slots is found
+            # Trigger cellular call if AT LEAST ONE target slot is found
             if len(available_target_slots) > 0:
                 print(f"[!] {len(available_target_slots)} target slot(s) found! Dispatching Twilio voice call...")
                 make_twilio_call()
