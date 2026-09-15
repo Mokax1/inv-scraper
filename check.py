@@ -22,15 +22,7 @@ MY_PHONE = os.environ.get("MY_PHONE_NUMBER")
 # Hosted TwiML Bin URL
 TWIML_BIN_URL = "https://handler.twilio.com/twiml/EH2af47328c7adc64103b682b874c70070"
 
-# Updated Target Courses (BS292 updated from 06-H to 08-H based on your checked lecture slot)
-TARGET_COURSES = {
-    "Maritime Law & IMO Conventions": ("08", "H"),
-    "Maritime Culture & Leadership": ("11", "K"),
-    "Terrestrial Navigation part II": ("04", "D"),
-    "Watch Keeping & Marine Communication": ("10", "J"),
-    "Ship Stability": ("10", "K"),
-    "Ship Compasses & Auto Pilot": ("02", "B"),
-}
+TOTAL_MONITORED = 2
 
 
 def send_telegram_status(available_slots):
@@ -38,21 +30,14 @@ def send_telegram_status(available_slots):
         print("[!] CALLMEBOT_USER secret is missing.")
         return
 
-    total = len(TARGET_COURSES)
     matched_count = len(available_slots)
-
-    if matched_count == total:
-        header = f"🚨 FULL TARGET SCHEDULE AVAILABLE! ({matched_count}/{total}) 🚨"
-    elif matched_count > 0:
-        header = f"📊 Registration Update: {matched_count}/{total} Target Groups Open"
-    else:
-        header = f"📊 Registration Update: 0/{total} Target Groups Open"
-
     if matched_count > 0:
+        header = f"🚨 TARGET SLOT FOUND! ({matched_count}/{TOTAL_MONITORED}) 🚨"
         lines = [f"• {name}: Group {grp}" for name, grp in available_slots.items()]
         body = "\n".join(lines)
     else:
-        body = "None of your target groups are open yet."
+        header = f"📊 Registration Update: 0/{TOTAL_MONITORED} Open"
+        body = "Neither Ship Stability (10-K) nor Maritime Law (08-H) is open yet."
 
     message = (
         f"{header}\n\n"
@@ -64,7 +49,7 @@ def send_telegram_status(available_slots):
     text_url = f"https://api.callmebot.com/text.php?user={CALLMEBOT_USER}&text={encoded_text}"
     try:
         r = requests.get(text_url, timeout=15)
-        print(f"[+] Telegram status update sent ({matched_count}/{total}) - Status: {r.status_code}")
+        print(f"[+] Telegram status update sent ({matched_count}/{TOTAL_MONITORED}) - Status: {r.status_code}")
     except Exception as e:
         print(f"[!] Telegram text failed: {e}")
 
@@ -145,22 +130,22 @@ def main():
 
             page.wait_for_timeout(4000)
 
-            # 4. Explicitly Click "Change Registered Courses" to unlock dropdowns
+            # 4. Click "Change Registered Courses" to unlock table
             print("[*] Checking for 'Change Registered Courses' button...")
             change_reg_btn = page.locator(
                 "#ctl00_ContentPlaceHolder1_lbtn_changeReg, a:has-text('Change Registered Courses')"
             ).first
 
             change_reg_btn.wait_for(state="attached", timeout=15000)
-            print("[*] Clicking 'Change Registered Courses' to switch table to editable mode...")
+            print("[*] Clicking 'Change Registered Courses'...")
 
             try:
                 change_reg_btn.click(force=True, timeout=5000)
             except Exception:
                 change_reg_btn.evaluate("el => el.click()")
 
-            # 5. Wait for editable dropdowns (<select>) to populate inside the table
-            print("[*] Waiting for dropdowns (<select>) to populate...")
+            # Wait for the editable controls to render
+            print("[*] Waiting for table controls...")
             page.wait_for_selector(
                 "#ctl00_ContentPlaceHolder1_grdvw_courses select",
                 state="visible",
@@ -168,56 +153,77 @@ def main():
             )
             page.wait_for_timeout(2000)
 
-            # 6. Direct Selector Check using Row Parent Text
             available_target_slots = {}
-            print("\n[*] Inspecting courses by Subject Name...")
 
-            for subject_name, (target_num, target_letter) in TARGET_COURSES.items():
-                target_str = f"{target_num}-{target_letter}"
-                unpadded_num = target_num.lstrip("0")
+            # =========================================================================
+            # Target 1: Check Ship Stability (in the registered courses table) for 10-K
+            # =========================================================================
+            print("\n[*] Checking Subject 1: Ship Stability (Target: 10-K)...")
+            row_selector = "#ctl00_ContentPlaceHolder1_grdvw_courses tr:has(td:has-text('Ship Stability'))"
+            ship_row = page.locator(row_selector).first
 
-                # Match row by subject name text
-                row_selector = f"#ctl00_ContentPlaceHolder1_grdvw_courses tr:has(td:has-text('{subject_name}'))"
-                row = page.locator(row_selector).first
+            if ship_row.count() > 0:
+                select_box = ship_row.locator("select").first
+                if select_box.count() > 0:
+                    options = select_box.locator("option").all_inner_texts()
+                    print(f"    Available Dropdown Options -> {options}")
 
-                if row.count() == 0:
-                    print(f"[-] Row for '{subject_name}' was not found.")
-                    continue
+                    for opt in options:
+                        opt_upper = opt.upper()
+                        if "10" in opt_upper and "K" in opt_upper:
+                            print("    => [MATCH FOUND] Ship Stability 10-K is available!")
+                            available_target_slots["Ship Stability"] = "10-K"
+                            break
+                    if "Ship Stability" not in available_target_slots:
+                        print("    => [UNAVAILABLE] 10-K not in Ship Stability options.")
+            else:
+                print("[-] Ship Stability row not found.")
 
-                select_box = row.locator("select").first
-                if select_box.count() == 0:
-                    print(f"[-] Dropdown in row for '{subject_name}' not found.")
-                    continue
+            # =========================================================================
+            # Target 2: Check Maritime Law (via top course selection dropdowns) for 08-H
+            # =========================================================================
+            print("\n[*] Checking Subject 2: Maritime Law & IMO Conventions (Target: 08-H)...")
+            course_ddl = page.locator("#ctl00_ContentPlaceHolder1_ddl_crsname")
+            course_ddl.wait_for(state="visible", timeout=10000)
 
-                # Read all option texts directly
-                options = select_box.locator("option").all_inner_texts()
-                print(f"[*] {subject_name} (Target: {target_str}):")
-                print(f"    Available Dropdown Options -> {options}")
+            # Select Maritime Law (value="11367     ")
+            print("[*] Selecting 'Maritime Law & IMO Conventions' from #ctl00_ContentPlaceHolder1_ddl_crsname...")
+            course_ddl.select_option(label="Maritime Law & IMO Conventions              (BS292*    )")
 
-                is_available = False
-                for opt in options:
-                    opt_upper = opt.upper()
-                    has_num = target_num in opt_upper or unpadded_num in opt_upper
-                    has_letter = target_letter.upper() in opt_upper
-                    if has_num and has_letter:
-                        is_available = True
-                        break
+            # Wait 2 seconds for the ASP.NET postback to reload the group dropdown
+            page.wait_for_timeout(2000)
 
-                if is_available:
-                    print(f"    => [MATCH] Found slot for {target_str}!")
-                    available_target_slots[subject_name] = target_str
-                else:
-                    print(f"    => [UNAVAILABLE] {target_str} not in dropdown.")
+            # Inspect group dropdown
+            grp_ddl = page.locator("#ctl00_ContentPlaceHolder1_ddl_grp")
+            grp_ddl.wait_for(state="visible", timeout=10000)
 
-            # 7. Notifications
+            grp_options = grp_ddl.locator("option").all_inner_texts()
+            print(f"    Available Group Options -> {grp_options}")
+
+            for opt in grp_options:
+                opt_upper = opt.upper()
+                # Matches "08" or "8" alongside "H"
+                has_num = ("08" in opt_upper) or (" 8 " in opt_upper) or ("8 -" in opt_upper)
+                has_letter = "H" in opt_upper
+                if has_num and has_letter:
+                    print("    => [MATCH FOUND] Maritime Law 08-H is available!")
+                    available_target_slots["Maritime Law"] = "08-H"
+                    break
+
+            if "Maritime Law" not in available_target_slots:
+                print("    => [UNAVAILABLE] 08-H not in Maritime Law group options.")
+
+            # =========================================================================
+            # Notifications & Trigger
+            # =========================================================================
             send_telegram_status(available_target_slots)
 
-            # Trigger Twilio voice call only when all 6 match
-            if len(available_target_slots) == len(TARGET_COURSES):
-                print("[!] ALL 6/6 TARGET SLOTS AVAILABLE! Placing Twilio phone call...")
+            # Trigger cellular call if AT LEAST ONE of the two target slots is found
+            if len(available_target_slots) > 0:
+                print(f"[!] {len(available_target_slots)} target slot(s) found! Dispatching Twilio voice call...")
                 make_twilio_call()
             else:
-                print(f"\n[i] Status: {len(available_target_slots)}/{len(TARGET_COURSES)} available.")
+                print(f"\n[i] Neither slot is available yet. No call dispatched.")
 
         except Exception as err:
             print(f"[!] Error during execution: {err}")
