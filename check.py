@@ -22,6 +22,13 @@ MY_PHONE = os.environ.get("MY_PHONE_NUMBER")
 # Hosted TwiML Bin URL
 TWIML_BIN_URL = "https://handler.twilio.com/twiml/EH2af47328c7adc64103b682b874c70070"
 
+# Target testing groups (Switch back to 10-K and 08-H after testing)
+TARGET_STABILITY_NUM = "09"
+TARGET_STABILITY_LETTER = "J"
+
+TARGET_LAW_NUM = "02"
+TARGET_LAW_LETTER = "B"
+
 TOTAL_MONITORED = 2
 
 
@@ -32,12 +39,12 @@ def send_telegram_status(available_slots):
 
     matched_count = len(available_slots)
     if matched_count > 0:
-        header = f"🚨 TARGET SLOT FOUND! ({matched_count}/{TOTAL_MONITORED}) 🚨"
+        header = f"🚨 TARGET SLOT FOUND & SELECTED! ({matched_count}/{TOTAL_MONITORED}) 🚨"
         lines = [f"• {name}: Group {grp}" for name, grp in available_slots.items()]
         body = "\n".join(lines)
     else:
         header = f"📊 Registration Update: 0/{TOTAL_MONITORED} Open"
-        body = "Neither Ship Stability (10-K) nor Maritime Law (08-H) is open yet."
+        body = "Neither target group was found."
 
     message = (
         f"{header}\n\n"
@@ -144,12 +151,9 @@ def main():
             except Exception:
                 change_reg_btn.evaluate("el => el.click()")
 
-            # SCREENSHOT 1: Immediately after clicking Change Registered Courses
             page.wait_for_timeout(3000)
             page.screenshot(path="step1_after_change_reg.png", full_page=True)
-            print("[+] Saved step1_after_change_reg.png")
 
-            # Wait for editable dropdowns to render
             print("[*] Waiting for table controls...")
             page.wait_for_selector(
                 "#ctl00_ContentPlaceHolder1_grdvw_courses select",
@@ -157,89 +161,87 @@ def main():
                 timeout=25000,
             )
             page.wait_for_timeout(1000)
-
-            # SCREENSHOT 2: Editable course table visible with dropdowns active
             page.screenshot(path="step2_editable_table.png", full_page=True)
-            print("[+] Saved step2_editable_table.png")
 
             available_target_slots = {}
 
             # =========================================================================
-            # Target 1: Check Ship Stability (in the registered courses table) for 10-K
+            # Target 1: Ship Stability (Select from Table Dropdown)
             # =========================================================================
-            print("\n[*] Checking Subject 1: Ship Stability (Target: 10-K)...")
+            print(f"\n[*] Checking Subject 1: Ship Stability (Target: {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER})...")
             row_selector = "#ctl00_ContentPlaceHolder1_grdvw_courses tr:has(td:has-text('Ship Stability'))"
             ship_row = page.locator(row_selector).first
 
             if ship_row.count() > 0:
                 select_box = ship_row.locator("select").first
                 if select_box.count() > 0:
-                    options = select_box.locator("option").all_inner_texts()
-                    print(f"    Available Dropdown Options -> {options}")
+                    options_elements = select_box.locator("option").all()
+                    matched_val = None
 
-                    for opt in options:
-                        opt_upper = opt.upper()
-                        if "10" in opt_upper and "K" in opt_upper:
-                            print("    => [MATCH FOUND] Ship Stability 10-K is available!")
-                            available_target_slots["Ship Stability"] = "10-K"
+                    for opt in options_elements:
+                        txt = opt.inner_text().upper()
+                        val = opt.get_attribute("value") or ""
+                        if TARGET_STABILITY_NUM in txt and TARGET_STABILITY_LETTER in txt:
+                            matched_val = val
                             break
-                    if "Ship Stability" not in available_target_slots:
-                        print("    => [UNAVAILABLE] 10-K not in Ship Stability options.")
+
+                    if matched_val is not None:
+                        print(f"    => [MATCH FOUND] Selecting group {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER}...")
+                        select_box.select_option(value=matched_val)
+                        page.wait_for_timeout(2000)
+                        available_target_slots["Ship Stability"] = f"{TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER}"
+                    else:
+                        print(f"    => [UNAVAILABLE] {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} not in options.")
             else:
                 print("[-] Ship Stability row not found.")
 
             # =========================================================================
-            # Target 2: Check Maritime Law (via top course selection dropdowns) for 08-H
+            # Target 2: Maritime Law (Select from Top Dropdown)
             # =========================================================================
-            print("\n[*] Checking Subject 2: Maritime Law & IMO Conventions (Target: 08-H)...")
+            print(f"\n[*] Checking Subject 2: Maritime Law (Target: {TARGET_LAW_NUM}-{TARGET_LAW_LETTER})...")
             course_ddl = page.locator("#ctl00_ContentPlaceHolder1_ddl_crsname")
             course_ddl.wait_for(state="visible", timeout=10000)
 
-            # Select Maritime Law (value="11367     ")
-            print("[*] Selecting 'Maritime Law & IMO Conventions' from #ctl00_ContentPlaceHolder1_ddl_crsname...")
+            print("[*] Choosing 'Maritime Law & IMO Conventions'...")
             course_ddl.select_option(label="Maritime Law & IMO Conventions              (BS292*    )")
-
-            # Wait 2 seconds for ASP.NET postback to reload group dropdown
-            page.wait_for_timeout(2000)
-
-            # SCREENSHOT 3: After choosing Maritime Law and triggering postback
+            page.wait_for_timeout(2500)
             page.screenshot(path="step3_maritime_law_selected.png", full_page=True)
-            print("[+] Saved step3_maritime_law_selected.png")
 
-            # Inspect group dropdown
             grp_ddl = page.locator("#ctl00_ContentPlaceHolder1_ddl_grp")
             grp_ddl.wait_for(state="visible", timeout=10000)
 
-            grp_options = grp_ddl.locator("option").all_inner_texts()
-            print(f"    Available Group Options -> {grp_options}")
+            grp_options_elements = grp_ddl.locator("option").all()
+            matched_law_val = None
 
-            for opt in grp_options:
-                opt_upper = opt.upper()
-                has_num = ("08" in opt_upper) or (" 8 " in opt_upper) or ("8 -" in opt_upper)
-                has_letter = "H" in opt_upper
-                if has_num and has_letter:
-                    print("    => [MATCH FOUND] Maritime Law 08-H is available!")
-                    available_target_slots["Maritime Law"] = "08-H"
+            for opt in grp_options_elements:
+                txt = opt.inner_text().upper()
+                val = opt.get_attribute("value") or ""
+                if TARGET_LAW_NUM in txt and TARGET_LAW_LETTER in txt:
+                    matched_law_val = val
                     break
 
-            if "Maritime Law" not in available_target_slots:
-                print("    => [UNAVAILABLE] 08-H not in Maritime Law group options.")
+            if matched_law_val is not None:
+                print(f"    => [MATCH FOUND] Selecting group {TARGET_LAW_NUM}-{TARGET_LAW_LETTER}...")
+                grp_ddl.select_option(value=matched_law_val)
+                page.wait_for_timeout(2000)
+                available_target_slots["Maritime Law"] = f"{TARGET_LAW_NUM}-{TARGET_LAW_LETTER}"
+            else:
+                print(f"    => [UNAVAILABLE] {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} not in group options.")
 
-            # SCREENSHOT 4: Final inspected state
-            page.screenshot(path="step4_final_check_state.png", full_page=True)
-            print("[+] Saved step4_final_check_state.png")
+            # SCREENSHOT 4: State after dropdown selections
+            page.screenshot(path="step4_selected_groups.png", full_page=True)
+            print("[+] Saved step4_selected_groups.png")
 
             # =========================================================================
             # Notifications & Trigger
             # =========================================================================
             send_telegram_status(available_target_slots)
 
-            # Trigger cellular call if AT LEAST ONE target slot is found
             if len(available_target_slots) > 0:
-                print(f"[!] {len(available_target_slots)} target slot(s) found! Dispatching Twilio voice call...")
+                print(f"[!] {len(available_target_slots)} target slot(s) selected! Placing Twilio voice call...")
                 make_twilio_call()
             else:
-                print(f"\n[i] Neither slot is available yet. No call dispatched.")
+                print("\n[i] No target slots selected.")
 
         except Exception as err:
             print(f"[!] Error during execution: {err}")
