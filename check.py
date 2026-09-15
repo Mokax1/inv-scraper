@@ -22,9 +22,9 @@ MY_PHONE = os.environ.get("MY_PHONE_NUMBER")
 # Hosted TwiML Bin URL
 TWIML_BIN_URL = "https://handler.twilio.com/twiml/EH2af47328c7adc64103b682b874c70070"
 
-# Target Courses & Group Codes
+# Updated Target Courses (BS292 updated from 06-H to 08-H based on your checked lecture slot)
 TARGET_COURSES = {
-    "Maritime Law & IMO Conventions": ("06", "H"),
+    "Maritime Law & IMO Conventions": ("08", "H"),
     "Maritime Culture & Leadership": ("11", "K"),
     "Terrestrial Navigation part II": ("04", "D"),
     "Watch Keeping & Marine Communication": ("10", "J"),
@@ -151,21 +151,20 @@ def main():
                 "#ctl00_ContentPlaceHolder1_lbtn_changeReg, a:has-text('Change Registered Courses')"
             ).first
 
-            # Wait for button to be available
             change_reg_btn.wait_for(state="attached", timeout=15000)
             print("[*] Clicking 'Change Registered Courses' to switch table to editable mode...")
-            
+
             try:
                 change_reg_btn.click(force=True, timeout=5000)
             except Exception:
                 change_reg_btn.evaluate("el => el.click()")
 
-            # 5. Wait for the editable dropdowns to actually render inside the table
+            # 5. Wait for editable dropdowns (<select>) to populate inside the table
             print("[*] Waiting for dropdowns (<select>) to populate...")
             page.wait_for_selector(
-                "#ctl00_ContentPlaceHolder1_grdvw_courses select", 
-                state="visible", 
-                timeout=25000
+                "#ctl00_ContentPlaceHolder1_grdvw_courses select",
+                state="visible",
+                timeout=25000,
             )
             page.wait_for_timeout(2000)
 
@@ -177,7 +176,7 @@ def main():
                 target_str = f"{target_num}-{target_letter}"
                 unpadded_num = target_num.lstrip("0")
 
-                # Locate the specific row that contains this subject's exact td text
+                # Match row by subject name text
                 row_selector = f"#ctl00_ContentPlaceHolder1_grdvw_courses tr:has(td:has-text('{subject_name}'))"
                 row = page.locator(row_selector).first
 
@@ -198,7 +197,6 @@ def main():
                 is_available = False
                 for opt in options:
                     opt_upper = opt.upper()
-                    # Check both padded ("02") and unpadded ("2") alongside target letter ("B")
                     has_num = target_num in opt_upper or unpadded_num in opt_upper
                     has_letter = target_letter.upper() in opt_upper
                     if has_num and has_letter:
@@ -214,7 +212,7 @@ def main():
             # 7. Notifications
             send_telegram_status(available_target_slots)
 
-            # Trigger Twilio voice call when all 6 match
+            # Trigger Twilio voice call only when all 6 match
             if len(available_target_slots) == len(TARGET_COURSES):
                 print("[!] ALL 6/6 TARGET SLOTS AVAILABLE! Placing Twilio phone call...")
                 make_twilio_call()
