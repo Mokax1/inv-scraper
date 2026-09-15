@@ -23,40 +23,23 @@ MY_PHONE = os.environ.get("MY_PHONE_NUMBER")
 TWIML_BIN_URL = "https://handler.twilio.com/twiml/EH2af47328c7adc64103b682b874c70070"
 
 # Target groups
-TARGET_STABILITY_NUM = "09"
-TARGET_STABILITY_LETTER = "J"
+TARGET_STABILITY_NUM = "10"
+TARGET_STABILITY_LETTER = "K"
 
-TARGET_LAW_NUM = "12"
-TARGET_LAW_LETTER = "L"
-
-TOTAL_MONITORED = 2
+TARGET_LAW_NUM = "08"
+TARGET_LAW_LETTER = "H"
 
 
-def send_telegram_status(available_slots):
+def send_telegram_status(message_text):
     if not CALLMEBOT_USER:
         print("[!] CALLMEBOT_USER secret is missing.")
         return
 
-    matched_count = len(available_slots)
-    if matched_count > 0:
-        header = f"🚨 TARGET SLOT FOUND & SELECTED! ({matched_count}/{TOTAL_MONITORED}) 🚨"
-        lines = [f"• {name}: Group {grp}" for name, grp in available_slots.items()]
-        body = "\n".join(lines)
-    else:
-        header = f"📊 Registration Update: 0/{TOTAL_MONITORED} Open"
-        body = "Neither target group was found."
-
-    message = (
-        f"{header}\n\n"
-        f"{body}\n\n"
-        "Portal: https://alexreg.aast.edu/aastreg/"
-    )
-
-    encoded_text = urllib.parse.quote(message)
+    encoded_text = urllib.parse.quote(message_text)
     text_url = f"https://api.callmebot.com/text.php?user={CALLMEBOT_USER}&text={encoded_text}"
     try:
         r = requests.get(text_url, timeout=15)
-        print(f"[+] Telegram status update sent ({matched_count}/{TOTAL_MONITORED}) - Status: {r.status_code}")
+        print(f"[+] Telegram update sent - Status: {r.status_code}")
     except Exception as e:
         print(f"[!] Telegram text failed: {e}")
 
@@ -88,20 +71,15 @@ def main():
         page = context.new_page()
 
         try:
-            # 1. Login Page
+            # 1. Login
             print("[*] Loading login page...")
-            page.goto(
-                "https://alexreg.aast.edu/aastreg/frm_login.aspx",
-                wait_until="networkidle",
-                timeout=30000,
-            )
+            page.goto("https://alexreg.aast.edu/aastreg/frm_login.aspx", wait_until="networkidle", timeout=30000)
 
             page.wait_for_selector("#ctl00_ContentPlaceHolder1_UserName", timeout=15000)
             page.locator("#ctl00_ContentPlaceHolder1_UserName").fill(REG_NUMBER)
             page.locator("#ctl00_ContentPlaceHolder1_Password").fill(PIN)
             page.wait_for_timeout(1000)
 
-            # Submit Login
             print("[*] Submitting login...")
             login_btn = page.locator("#ctl00_ContentPlaceHolder1_btn_login")
             with page.expect_navigation(wait_until="domcontentloaded", timeout=30000):
@@ -110,11 +88,9 @@ def main():
                 except Exception:
                     login_btn.evaluate("el => el.click()")
 
-            # 2. Choice Page -> Click "REGISTER MAJOR"
+            # 2. Choice Page -> REGISTER MAJOR
             print(f"[*] Landed on: {page.url}")
-            major_locator = page.locator(
-                "#ctl00_ContentPlaceHolder1_l_major, a:has-text('REGISTER MAJOR')"
-            ).first
+            major_locator = page.locator("#ctl00_ContentPlaceHolder1_l_major, a:has-text('REGISTER MAJOR')").first
             major_locator.wait_for(state="attached", timeout=20000)
 
             with page.expect_navigation(wait_until="domcontentloaded", timeout=30000):
@@ -123,11 +99,9 @@ def main():
                 except Exception:
                     major_locator.evaluate("el => el.click()")
 
-            # 3. Menu Page -> Click "Online Registration"
+            # 3. Menu Page -> Online Registration
             print(f"[*] Landed on: {page.url}")
-            reg_locator = page.locator(
-                "#ctl00_ContentPlaceHolder1_Lbtn_Reg, a:has-text('Online Registration')"
-            ).first
+            reg_locator = page.locator("#ctl00_ContentPlaceHolder1_Lbtn_Reg, a:has-text('Online Registration')").first
             reg_locator.wait_for(state="attached", timeout=20000)
 
             try:
@@ -137,12 +111,9 @@ def main():
 
             page.wait_for_timeout(4000)
 
-            # 4. Click "Change Registered Courses" to unlock table
+            # 4. Click "Change Registered Courses"
             print("[*] Checking for 'Change Registered Courses' button...")
-            change_reg_btn = page.locator(
-                "#ctl00_ContentPlaceHolder1_lbtn_changeReg, a:has-text('Change Registered Courses')"
-            ).first
-
+            change_reg_btn = page.locator("#ctl00_ContentPlaceHolder1_lbtn_changeReg, a:has-text('Change Registered Courses')").first
             change_reg_btn.wait_for(state="attached", timeout=15000)
             print("[*] Clicking 'Change Registered Courses'...")
 
@@ -155,93 +126,187 @@ def main():
             page.screenshot(path="step1_after_change_reg.png", full_page=True)
 
             print("[*] Waiting for table controls...")
-            page.wait_for_selector(
-                "#ctl00_ContentPlaceHolder1_grdvw_courses select",
-                state="visible",
-                timeout=25000,
-            )
+            page.wait_for_selector("#ctl00_ContentPlaceHolder1_grdvw_courses select", state="visible", timeout=25000)
             page.wait_for_timeout(1000)
-            page.screenshot(path="step2_editable_table.png", full_page=True)
 
-            available_target_slots = {}
+            # Flags
+            stability_found = False
+            stability_already_registered = False
+            matched_stability_val = None
+            ship_select_box = None
+
+            law_found = False
+            law_already_registered = False
+            matched_law_val = None
 
             # =========================================================================
-            # Target 1: Ship Stability (Select from Table Dropdown)
+            # CHECK 1: Ship Stability (Target: 10-K)
             # =========================================================================
-            print(f"\n[*] Checking Subject 1: Ship Stability (Target: {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER})...")
-            row_selector = "#ctl00_ContentPlaceHolder1_grdvw_courses tr:has(td:has-text('Ship Stability'))"
-            ship_row = page.locator(row_selector).first
+            print(f"\n[*] Checking Ship Stability (Target: {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER})...")
+            ship_row = page.locator("#ctl00_ContentPlaceHolder1_grdvw_courses tr:has(td:has-text('Ship Stability'))").first
 
             if ship_row.count() > 0:
-                select_box = ship_row.locator("select").first
-                if select_box.count() > 0:
-                    options_elements = select_box.locator("option").all()
-                    matched_val = None
-
-                    for opt in options_elements:
-                        txt = opt.inner_text().upper()
-                        val = opt.get_attribute("value") or ""
-                        if TARGET_STABILITY_NUM in txt and TARGET_STABILITY_LETTER in txt:
-                            matched_val = val
-                            break
-
-                    if matched_val is not None:
-                        print(f"    => [MATCH FOUND] Selecting group {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER}...")
-                        select_box.select_option(value=matched_val)
-                        page.wait_for_timeout(2000)
-                        available_target_slots["Ship Stability"] = f"{TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER}"
-                    else:
-                        print(f"    => [UNAVAILABLE] {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} not in options.")
+                current_grp_text = ship_row.inner_text().upper()
+                if TARGET_STABILITY_NUM in current_grp_text and TARGET_STABILITY_LETTER in current_grp_text:
+                    print("    => [OK] Ship Stability 10-K is ALREADY registered.")
+                    stability_already_registered = True
+                    stability_found = True
+                else:
+                    ship_select_box = ship_row.locator("select").first
+                    if ship_select_box.count() > 0:
+                        options = ship_select_box.locator("option").all()
+                        for opt in options:
+                            txt = opt.inner_text().upper()
+                            val = opt.get_attribute("value") or ""
+                            if TARGET_STABILITY_NUM in txt and TARGET_STABILITY_LETTER in txt:
+                                matched_stability_val = val
+                                stability_found = True
+                                print(f"    => [FOUND] Group {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} is available for Ship Stability!")
+                                break
+                    if not stability_found:
+                        print(f"    => [UNAVAILABLE] {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} not in Ship Stability options.")
             else:
                 print("[-] Ship Stability row not found.")
 
             # =========================================================================
-            # Target 2: Maritime Law (Select from Top Dropdown)
+            # CHECK 2: Maritime Law (Target: 08-H)
             # =========================================================================
-            print(f"\n[*] Checking Subject 2: Maritime Law (Target: {TARGET_LAW_NUM}-{TARGET_LAW_LETTER})...")
-            course_ddl = page.locator("#ctl00_ContentPlaceHolder1_ddl_crsname")
-            course_ddl.wait_for(state="visible", timeout=10000)
+            print(f"\n[*] Checking Maritime Law (Target: {TARGET_LAW_NUM}-{TARGET_LAW_LETTER})...")
+            law_row = page.locator("#ctl00_ContentPlaceHolder1_grdvw_courses tr:has(td:has-text('Maritime Law'))").first
+            if law_row.count() > 0:
+                row_txt = law_row.inner_text().upper()
+                if TARGET_LAW_NUM in row_txt and TARGET_LAW_LETTER in row_txt:
+                    print(f"    => [OK] Maritime Law {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} is ALREADY registered.")
+                    law_already_registered = True
+                    law_found = True
 
-            print("[*] Choosing 'Maritime Law & IMO Conventions'...")
-            course_ddl.select_option(label="Maritime Law & IMO Conventions              (BS292*    )")
-            page.wait_for_timeout(2500)
-            page.screenshot(path="step3_maritime_law_selected.png", full_page=True)
+            if not law_already_registered:
+                course_ddl = page.locator("#ctl00_ContentPlaceHolder1_ddl_crsname")
+                course_ddl.wait_for(state="visible", timeout=10000)
 
-            grp_ddl = page.locator("#ctl00_ContentPlaceHolder1_ddl_grp")
-            grp_ddl.wait_for(state="visible", timeout=10000)
+                course_options = course_ddl.locator("option").all_inner_texts()
+                law_opt_label = next((o for o in course_options if "Maritime Law" in o), None)
 
-            grp_options_elements = grp_ddl.locator("option").all()
-            matched_law_val = None
+                if law_opt_label:
+                    print(f"[*] Selecting '{law_opt_label.strip()}' in top dropdown...")
+                    course_ddl.select_option(label=law_opt_label)
+                    page.wait_for_timeout(2500)
 
-            for opt in grp_options_elements:
-                txt = opt.inner_text().upper()
-                val = opt.get_attribute("value") or ""
-                if TARGET_LAW_NUM in txt and TARGET_LAW_LETTER in txt:
-                    matched_law_val = val
-                    break
+                    grp_ddl = page.locator("#ctl00_ContentPlaceHolder1_ddl_grp")
+                    grp_ddl.wait_for(state="visible", timeout=10000)
 
-            if matched_law_val is not None:
-                print(f"    => [MATCH FOUND] Selecting group {TARGET_LAW_NUM}-{TARGET_LAW_LETTER}...")
-                grp_ddl.select_option(value=matched_law_val)
-                page.wait_for_timeout(2000)
-                available_target_slots["Maritime Law"] = f"{TARGET_LAW_NUM}-{TARGET_LAW_LETTER}"
-            else:
-                print(f"    => [UNAVAILABLE] {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} not in group options.")
+                    grp_options = grp_ddl.locator("option").all()
+                    for opt in grp_options:
+                        txt = opt.inner_text().upper()
+                        val = opt.get_attribute("value") or ""
+                        if TARGET_LAW_NUM in txt and TARGET_LAW_LETTER in txt:
+                            matched_law_val = val
+                            law_found = True
+                            print(f"    => [FOUND] Group {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} is available for Maritime Law!")
+                            break
 
-            # Final screenshot after selecting options
-            page.screenshot(path="step4_selected_groups.png", full_page=True)
-            print("[+] Saved step4_selected_groups.png")
+                    if not law_found:
+                        print(f"    => [UNAVAILABLE] Group {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} not in Maritime Law dropdown.")
+                else:
+                    print("[-] Maritime Law not found in course select dropdown.")
+
+            page.screenshot(path="step2_after_checks.png", full_page=True)
 
             # =========================================================================
-            # Notifications & Trigger
+            # IMMEDIATE NOTIFICATIONS & ALERT DISPATCH (BEFORE REGISTRATION ACTIONS)
             # =========================================================================
-            send_telegram_status(available_target_slots)
-
-            if len(available_target_slots) > 0:
-                print(f"[!] {len(available_target_slots)} target slot(s) selected! Placing Twilio voice call...")
+            # Scenario A: Both slots are available / ready
+            if stability_found and law_found and (not stability_already_registered or not law_already_registered):
+                alert_msg = (
+                    "🚨 FULL TARGET SCHEDULE DETECTED! 🚨\n\n"
+                    f"• Ship Stability: {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} AVAILABLE\n"
+                    f"• Maritime Law: {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} AVAILABLE\n\n"
+                    "Automating enrollment now...\n"
+                    "Portal: https://alexreg.aast.edu/aastreg/"
+                )
+                print("[!] Full schedule match! Sending alert & placing call immediately...")
+                send_telegram_status(alert_msg)
                 make_twilio_call()
+
+            # Scenario B: Stability open alone (Law unavailable)
+            elif stability_found and not stability_already_registered and not law_found:
+                alert_msg = (
+                    "⚡ SHIP STABILITY AVAILABLE! ⚡\n\n"
+                    f"• Ship Stability: {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} AVAILABLE\n"
+                    f"• Maritime Law: {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} (Full / Waiting)\n\n"
+                    "Automating Ship Stability enrollment now...\n"
+                    "Portal: https://alexreg.aast.edu/aastreg/"
+                )
+                print("[!] Stability match found! Sending alert & placing call immediately...")
+                send_telegram_status(alert_msg)
+                make_twilio_call()
+
+            # Scenario C: Only Law found (Stability unavailable - Held back per rule)
+            elif law_found and not law_already_registered and not stability_found:
+                alert_msg = (
+                    "⚠️ LAW AVAILABLE, BUT HELD BACK ⚠️\n\n"
+                    f"• Maritime Law: {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} is OPEN\n"
+                    f"• Ship Stability: {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} is NOT open\n\n"
+                    "Holding registration per rule: Law is never confirmed alone.\n"
+                    "Portal: https://alexreg.aast.edu/aastreg/"
+                )
+                print("[i] Maritime Law open alone. Sending Telegram notice (No call)...")
+                send_telegram_status(alert_msg)
+
+            # Scenario D: Already registered
+            elif stability_already_registered and law_already_registered:
+                send_telegram_status("✅ Both Ship Stability (10-K) and Maritime Law (08-H) are already fully registered.")
+
+            # Scenario E: Neither available
             else:
-                print("\n[i] No target slots selected.")
+                send_telegram_status("📊 Registration Update: 0/2 target groups open (10-K & 08-H).")
+
+            # =========================================================================
+            # REGISTRATION ACTIONS & CONFIRMATION
+            # =========================================================================
+            needs_confirm = False
+
+            # 1. Select Ship Stability if it was found and not yet registered
+            if stability_found and not stability_already_registered and matched_stability_val and ship_select_box:
+                print(f"[*] Selecting Ship Stability {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} in table...")
+                ship_select_box.select_option(value=matched_stability_val)
+                page.wait_for_timeout(2000)
+                needs_confirm = True
+
+            # 2. Add Maritime Law ONLY if Stability is secure (either already registered or selected above)
+            if law_found and not law_already_registered and matched_law_val and stability_found:
+                print("[*] Stability is satisfied. Adding Maritime Law...")
+                grp_ddl = page.locator("#ctl00_ContentPlaceHolder1_ddl_grp")
+                grp_ddl.select_option(value=matched_law_val)
+                page.wait_for_timeout(1000)
+
+                add_btn = page.locator("#ctl00_ContentPlaceHolder1_lbtn_add").first
+                add_btn.wait_for(state="attached", timeout=5000)
+                try:
+                    add_btn.click(force=True, timeout=5000)
+                except Exception:
+                    add_btn.evaluate("el => el.click()")
+
+                page.wait_for_timeout(3000)
+                page.screenshot(path="step3_after_add_law.png", full_page=True)
+                needs_confirm = True
+
+            # 3. Confirm Registration
+            if needs_confirm:
+                print("[*] Clicking 'Confirm Registration'...")
+                confirm_btn = page.locator("#ctl00_ContentPlaceHolder1_lbtn_confirm, a:has-text('Confirm Registration')").first
+                confirm_btn.wait_for(state="attached", timeout=10000)
+
+                try:
+                    confirm_btn.click(force=True, timeout=5000)
+                except Exception:
+                    confirm_btn.evaluate("el => el.click()")
+
+                print("[*] Waiting for final registration confirmation modal...")
+                page.wait_for_selector("#TB_window, font:has-text('The final registration has been implemented')", timeout=20000)
+                page.screenshot(path="step4_registration_confirmed.png", full_page=True)
+                print("[+] Saved step4_registration_confirmed.png")
+                print("[+] Final registration flow executed successfully.")
 
         except Exception as err:
             print(f"[!] Error during execution: {err}")
