@@ -44,10 +44,10 @@ jobs:
           path: debugcheck.png
           if-no-files-found: ignore
 
-      - name: Upload Step Screenshots
-        if: always()
+      - name: Upload Debug Screenshots on Failure
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: step-screenshots
+          name: failure-screenshots
           path: "*.png"
-          if-no-files-found: ignore 
+          retention-days: 1
