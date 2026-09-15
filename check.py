@@ -22,12 +22,12 @@ MY_PHONE = os.environ.get("MY_PHONE_NUMBER")
 # Hosted TwiML Bin URL
 TWIML_BIN_URL = "https://handler.twilio.com/twiml/EH2af47328c7adc64103b682b874c70070"
 
-# Target testing groups (Switch back to 10-K and 08-H after testing)
+# Target groups
 TARGET_STABILITY_NUM = "09"
 TARGET_STABILITY_LETTER = "J"
 
-TARGET_LAW_NUM = "02"
-TARGET_LAW_LETTER = "B"
+TARGET_LAW_NUM = "12"
+TARGET_LAW_LETTER = "L"
 
 TOTAL_MONITORED = 2
 
@@ -228,7 +228,7 @@ def main():
             else:
                 print(f"    => [UNAVAILABLE] {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} not in group options.")
 
-            # SCREENSHOT 4: State after dropdown selections
+            # Final screenshot after selecting options
             page.screenshot(path="step4_selected_groups.png", full_page=True)
             print("[+] Saved step4_selected_groups.png")
 
