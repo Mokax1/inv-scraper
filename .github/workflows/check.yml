@@ -43,3 +43,11 @@ jobs:
           name: debugcheck-screenshot
           path: debugcheck.png
           if-no-files-found: ignore
+
+      - name: Upload Step Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: step-screenshots
+          path: "*.png"
+          if-no-files-found: ignore 
