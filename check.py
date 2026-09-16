@@ -209,27 +209,26 @@ def main():
                 else:
                     print("[-] Maritime Law not found in course select dropdown.")
 
-            # =========================================================================
-            # ALERT & NOTIFICATION LOGIC
-            # =========================================================================
-            can_register_law = law_found and not law_already_registered and (stability_found or stability_already_registered)
+            # Independent actionable conditions
             can_register_stability = stability_found and not stability_already_registered
+            can_register_law = law_found and not law_already_registered
 
-            # Scenario 1: Both need registration and both are available
+            # =========================================================================
+            # IMMEDIATE NOTIFICATIONS & ALERT DISPATCH
+            # =========================================================================
             if can_register_stability and can_register_law:
                 alert_msg = (
-                    "🚨 FULL TARGET SCHEDULE AVAILABLE! 🚨\n\n"
+                    "🚨 BOTH TARGET GROUPS AVAILABLE! 🚨\n\n"
                     f"• Ship Stability: {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} AVAILABLE\n"
                     f"• Maritime Law: {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} AVAILABLE\n\n"
                     "Automating enrollment for both now...\n"
                     "Portal: https://alexreg.aast.edu/aastreg/"
                 )
-                print("[!] Full schedule match! Sending alert & placing call...")
+                print("[!] Full match! Sending alert & placing call...")
                 send_telegram_status(alert_msg)
                 make_twilio_call()
 
-            # Scenario 2: Stability available, Law unavailable or already safe
-            elif can_register_stability and not can_register_law:
+            elif can_register_stability:
                 alert_msg = (
                     "⚡ SHIP STABILITY AVAILABLE! ⚡\n\n"
                     f"• Ship Stability: {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} AVAILABLE\n"
@@ -241,36 +240,21 @@ def main():
                 send_telegram_status(alert_msg)
                 make_twilio_call()
 
-            # Scenario 3: Law available alone AND Stability is already registered
-            elif can_register_law and stability_already_registered:
+            elif can_register_law:
                 alert_msg = (
                     "⚡ MARITIME LAW AVAILABLE! ⚡\n\n"
                     f"• Maritime Law: {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} AVAILABLE\n"
-                    f"• Ship Stability: Already Registered (10-K)\n\n"
+                    f"• Ship Stability: {'Already Registered' if stability_already_registered else 'Full / Waiting'}\n\n"
                     "Automating Maritime Law enrollment now...\n"
                     "Portal: https://alexreg.aast.edu/aastreg/"
                 )
-                print("[!] Law match found (Stability is already safe)! Sending alert & placing call...")
+                print("[!] Law match found! Sending alert & placing call...")
                 send_telegram_status(alert_msg)
                 make_twilio_call()
 
-            # Scenario 4: Law available alone BUT Stability is NOT registered
-            elif law_found and not law_already_registered and not (stability_found or stability_already_registered):
-                alert_msg = (
-                    "⚠️ LAW AVAILABLE, BUT HELD BACK ⚠️\n\n"
-                    f"• Maritime Law: {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} is OPEN\n"
-                    f"• Ship Stability: Neither registered nor available (10-K)\n\n"
-                    "Holding registration per rule: Law cannot be added without Stability confirmed.\n"
-                    "Portal: https://alexreg.aast.edu/aastreg/"
-                )
-                print("[i] Maritime Law open alone without Stability. Alerting via Telegram only...")
-                send_telegram_status(alert_msg)
-
-            # Scenario 5: Both already registered
             elif stability_already_registered and law_already_registered:
-                send_telegram_status("✅ Both Ship Stability (10-K) and Maritime Law (08-H) are fully registered.")
+                send_telegram_status("✅ Both Ship Stability (10-K) and Maritime Law (08-H) are already fully registered.")
 
-            # Scenario 6: Neither available
             else:
                 send_telegram_status("📊 Registration Update: 0/2 target groups open (10-K & 08-H).")
 
@@ -279,16 +263,16 @@ def main():
             # =========================================================================
             needs_confirm = False
 
-            # 1. Select Ship Stability in table
+            # 1. Select Ship Stability in table if newly open
             if can_register_stability and matched_stability_val and ship_select_box:
                 print(f"[*] Selecting Ship Stability {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER}...")
                 ship_select_box.select_option(value=matched_stability_val)
                 page.wait_for_timeout(2000)
                 needs_confirm = True
 
-            # 2. Add Maritime Law (Permitted if Stability is newly selected OR already registered)
+            # 2. Add Maritime Law if newly open (allowed completely independently)
             if can_register_law and matched_law_val:
-                print(f"[*] Stability condition satisfied. Adding Maritime Law {TARGET_LAW_NUM}-{TARGET_LAW_LETTER}...")
+                print(f"[*] Adding Maritime Law {TARGET_LAW_NUM}-{TARGET_LAW_LETTER}...")
                 grp_ddl = page.locator("#ctl00_ContentPlaceHolder1_ddl_grp")
                 grp_ddl.select_option(value=matched_law_val)
                 page.wait_for_timeout(1000)
@@ -303,9 +287,9 @@ def main():
                 page.wait_for_timeout(3000)
                 needs_confirm = True
 
-            # 3. Confirm Registration
+            # 3. Confirm Registration once for any and all staged additions/selections
             if needs_confirm:
-                print("[*] Locking in registration: Clicking 'Confirm Registration'...")
+                print("[*] Clicking 'Confirm Registration'...")
                 confirm_btn = page.locator("#ctl00_ContentPlaceHolder1_lbtn_confirm, a:has-text('Confirm Registration')").first
                 confirm_btn.wait_for(state="attached", timeout=10000)
 
