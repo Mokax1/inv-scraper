@@ -22,12 +22,9 @@ MY_PHONE = os.environ.get("MY_PHONE_NUMBER")
 # Hosted TwiML Bin URL
 TWIML_BIN_URL = "https://handler.twilio.com/twiml/EH2af47328c7adc64103b682b874c70070"
 
-# Target groups
+# Target group for Ship Stability
 TARGET_STABILITY_NUM = "10"
 TARGET_STABILITY_LETTER = "K"
-
-TARGET_LAW_NUM = "08"
-TARGET_LAW_LETTER = "H"
 
 
 def send_telegram_status(message_text):
@@ -128,18 +125,13 @@ def main():
             page.wait_for_selector("#ctl00_ContentPlaceHolder1_grdvw_courses select", state="visible", timeout=25000)
             page.wait_for_timeout(1000)
 
-            # Status Tracking
             stability_found = False
             stability_already_registered = False
             matched_stability_val = None
             ship_select_box = None
 
-            law_found = False
-            law_already_registered = False
-            matched_law_val = None
-
             # =========================================================================
-            # CHECK 1: Ship Stability (Target: 10-K)
+            # CHECK: Ship Stability (Target: 10-K)
             # =========================================================================
             print(f"\n[*] Checking Ship Stability (Target: {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER})...")
             ship_row = page.locator("#ctl00_ContentPlaceHolder1_grdvw_courses tr:has(td:has-text('Ship Stability'))").first
@@ -160,7 +152,7 @@ def main():
                             if TARGET_STABILITY_NUM in txt and TARGET_STABILITY_LETTER in txt:
                                 matched_stability_val = val
                                 stability_found = True
-                                print(f"    => [FOUND] Group {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} is available for Ship Stability!")
+                                print(f"    => [FOUND] Group {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} is available!")
                                 break
                     if not stability_found:
                         print(f"    => [UNAVAILABLE] {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} not in Ship Stability options.")
@@ -168,127 +160,29 @@ def main():
                 print("[-] Ship Stability row not found.")
 
             # =========================================================================
-            # CHECK 2: Maritime Law (Target: 08-H)
+            # ALERTS & EXECUTION
             # =========================================================================
-            print(f"\n[*] Checking Maritime Law (Target: {TARGET_LAW_NUM}-{TARGET_LAW_LETTER})...")
-            law_row = page.locator("#ctl00_ContentPlaceHolder1_grdvw_courses tr:has(td:has-text('Maritime Law'))").first
-            if law_row.count() > 0:
-                row_txt = law_row.inner_text().upper()
-                if TARGET_LAW_NUM in row_txt and TARGET_LAW_LETTER in row_txt:
-                    print(f"    => [OK] Maritime Law {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} is ALREADY registered.")
-                    law_already_registered = True
-                    law_found = True
+            if stability_already_registered:
+                send_telegram_status("✅ Ship Stability (10-K) is already confirmed & registered.")
+                print("[i] Nothing to do. Already registered.")
 
-            if not law_already_registered:
-                course_ddl = page.locator("#ctl00_ContentPlaceHolder1_ddl_crsname")
-                course_ddl.wait_for(state="visible", timeout=10000)
-
-                course_options = course_ddl.locator("option").all_inner_texts()
-                law_opt_label = next((o for o in course_options if "Maritime Law" in o), None)
-
-                if law_opt_label:
-                    print(f"[*] Selecting '{law_opt_label.strip()}' in top dropdown...")
-                    course_ddl.select_option(label=law_opt_label)
-                    page.wait_for_timeout(2500)
-
-                    grp_ddl = page.locator("#ctl00_ContentPlaceHolder1_ddl_grp")
-                    grp_ddl.wait_for(state="visible", timeout=10000)
-
-                    grp_options = grp_ddl.locator("option").all()
-                    for opt in grp_options:
-                        txt = opt.inner_text().upper()
-                        val = opt.get_attribute("value") or ""
-                        if TARGET_LAW_NUM in txt and TARGET_LAW_LETTER in txt:
-                            matched_law_val = val
-                            law_found = True
-                            print(f"    => [FOUND] Group {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} is available for Maritime Law!")
-                            break
-
-                    if not law_found:
-                        print(f"    => [UNAVAILABLE] Group {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} not in Maritime Law dropdown.")
-                else:
-                    print("[-] Maritime Law not found in course select dropdown.")
-
-            # Independent actionable conditions
-            can_register_stability = stability_found and not stability_already_registered
-            can_register_law = law_found and not law_already_registered
-
-            # =========================================================================
-            # IMMEDIATE NOTIFICATIONS & ALERT DISPATCH
-            # =========================================================================
-            if can_register_stability and can_register_law:
+            elif stability_found and matched_stability_val and ship_select_box:
+                # 1. Alert immediately before triggering the clicks
                 alert_msg = (
-                    "🚨 BOTH TARGET GROUPS AVAILABLE! 🚨\n\n"
-                    f"• Ship Stability: {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} AVAILABLE\n"
-                    f"• Maritime Law: {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} AVAILABLE\n\n"
-                    "Automating enrollment for both now...\n"
+                    "🚨 SHIP STABILITY 10-K IS OPEN! 🚨\n\n"
+                    "Automating enrollment and confirmation now...\n"
                     "Portal: https://alexreg.aast.edu/aastreg/"
                 )
-                print("[!] Full match! Sending alert & placing call...")
+                print("[!] Slot open! Sending Telegram update & placing call...")
                 send_telegram_status(alert_msg)
                 make_twilio_call()
 
-            elif can_register_stability:
-                alert_msg = (
-                    "⚡ SHIP STABILITY AVAILABLE! ⚡\n\n"
-                    f"• Ship Stability: {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} AVAILABLE\n"
-                    f"• Maritime Law: {'Already Registered' if law_already_registered else 'Full / Waiting'}\n\n"
-                    "Automating Ship Stability enrollment now...\n"
-                    "Portal: https://alexreg.aast.edu/aastreg/"
-                )
-                print("[!] Stability match found! Sending alert & placing call...")
-                send_telegram_status(alert_msg)
-                make_twilio_call()
-
-            elif can_register_law:
-                alert_msg = (
-                    "⚡ MARITIME LAW AVAILABLE! ⚡\n\n"
-                    f"• Maritime Law: {TARGET_LAW_NUM}-{TARGET_LAW_LETTER} AVAILABLE\n"
-                    f"• Ship Stability: {'Already Registered' if stability_already_registered else 'Full / Waiting'}\n\n"
-                    "Automating Maritime Law enrollment now...\n"
-                    "Portal: https://alexreg.aast.edu/aastreg/"
-                )
-                print("[!] Law match found! Sending alert & placing call...")
-                send_telegram_status(alert_msg)
-                make_twilio_call()
-
-            elif stability_already_registered and law_already_registered:
-                send_telegram_status("✅ Both Ship Stability (10-K) and Maritime Law (08-H) are already fully registered.")
-
-            else:
-                send_telegram_status("📊 Registration Update: 0/2 target groups open (10-K & 08-H).")
-
-            # =========================================================================
-            # AUTOMATED REGISTRATION EXECUTION
-            # =========================================================================
-            needs_confirm = False
-
-            # 1. Select Ship Stability in table if newly open
-            if can_register_stability and matched_stability_val and ship_select_box:
-                print(f"[*] Selecting Ship Stability {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER}...")
+                # 2. Select 10-K in the dropdown
+                print(f"[*] Selecting {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} in dropdown...")
                 ship_select_box.select_option(value=matched_stability_val)
                 page.wait_for_timeout(2000)
-                needs_confirm = True
 
-            # 2. Add Maritime Law if newly open (allowed completely independently)
-            if can_register_law and matched_law_val:
-                print(f"[*] Adding Maritime Law {TARGET_LAW_NUM}-{TARGET_LAW_LETTER}...")
-                grp_ddl = page.locator("#ctl00_ContentPlaceHolder1_ddl_grp")
-                grp_ddl.select_option(value=matched_law_val)
-                page.wait_for_timeout(1000)
-
-                add_btn = page.locator("#ctl00_ContentPlaceHolder1_lbtn_add").first
-                add_btn.wait_for(state="attached", timeout=5000)
-                try:
-                    add_btn.click(force=True, timeout=5000)
-                except Exception:
-                    add_btn.evaluate("el => el.click()")
-
-                page.wait_for_timeout(3000)
-                needs_confirm = True
-
-            # 3. Confirm Registration once for any and all staged additions/selections
-            if needs_confirm:
+                # 3. Confirm Registration
                 print("[*] Clicking 'Confirm Registration'...")
                 confirm_btn = page.locator("#ctl00_ContentPlaceHolder1_lbtn_confirm, a:has-text('Confirm Registration')").first
                 confirm_btn.wait_for(state="attached", timeout=10000)
@@ -300,9 +194,14 @@ def main():
 
                 print("[*] Waiting for final registration confirmation modal...")
                 page.wait_for_selector("#TB_window, font:has-text('The final registration has been implemented')", timeout=20000)
-                page.screenshot(path="final_confirmation_success.png", full_page=True)
-                print("[+] Saved final_confirmation_success.png")
-                print("[+] Registration confirmed successfully.")
+                page.screenshot(path="stability_confirmed_success.png", full_page=True)
+                print("[+] Saved stability_confirmed_success.png")
+                print("[+] Ship Stability registered & confirmed successfully!")
+
+                send_telegram_status("🎉 ENROLLMENT COMPLETE: Ship Stability (10-K) is registered and confirmed!")
+
+            else:
+                send_telegram_status("📊 Registration Update: Ship Stability (10-K) not open yet.")
 
         except Exception as err:
             print(f"[!] Error during execution: {err}")
