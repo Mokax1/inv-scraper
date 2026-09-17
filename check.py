@@ -9,8 +9,8 @@ from playwright.sync_api import sync_playwright
 REG_NUMBER = os.environ.get("AAST_REG_NUM")
 PIN = os.environ.get("AAST_PIN")
 
-# Alerts
-CALLMEBOT_USER = os.environ.get("CALLMEBOT_USER")
+# CallMeBot Telegram Group Secret
+CALLMEBOT_GROUP_APIKEY = os.environ.get("CALLMEBOT_GROUP_APIKEY")
 
 # Twilio Credentials (API Key Pair)
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
@@ -28,17 +28,17 @@ TARGET_STABILITY_LETTER = "K"
 
 
 def send_telegram_status(message_text):
-    if not CALLMEBOT_USER:
-        print("[!] CALLMEBOT_USER secret is missing.")
+    if not CALLMEBOT_GROUP_APIKEY:
+        print("[!] CALLMEBOT_GROUP_APIKEY secret is missing.")
         return
 
     encoded_text = urllib.parse.quote(message_text)
-    text_url = f"https://api.callmebot.com/text.php?user={CALLMEBOT_USER}&text={encoded_text}"
+    text_url = f"https://api.callmebot.com/telegram/group.php?apikey={CALLMEBOT_GROUP_APIKEY}&text={encoded_text}"
     try:
         r = requests.get(text_url, timeout=15)
-        print(f"[+] Telegram update sent - Status: {r.status_code}")
+        print(f"[+] Telegram group update sent - Status: {r.status_code}")
     except Exception as e:
-        print(f"[!] Telegram text failed: {e}")
+        print(f"[!] Telegram group send failed: {e}")
 
 
 def make_twilio_call():
@@ -139,7 +139,6 @@ def main():
             if ship_row.count() > 0:
                 ship_select_box = ship_row.locator("select").first
                 if ship_select_box.count() > 0:
-                    # 1. Check ONLY the currently active/selected option in the dropdown
                     currently_selected_text = ship_select_box.evaluate("el => el.options[el.selectedIndex] ? el.options[el.selectedIndex].text : ''").upper()
                     print(f"    Current Active Selection -> {currently_selected_text}")
 
@@ -148,7 +147,6 @@ def main():
                         stability_already_registered = True
                         stability_found = True
                     else:
-                        # 2. Inspect available options to see if 10-K has opened up
                         options = ship_select_box.locator("option").all()
                         for opt in options:
                             txt = opt.inner_text().upper()
@@ -172,22 +170,21 @@ def main():
                 print("[i] Nothing to do. Already registered.")
 
             elif stability_found and matched_stability_val and ship_select_box:
-                # 1. Alert immediately before clicking
                 alert_msg = (
                     "🚨 SHIP STABILITY 10-K IS OPEN! 🚨\n\n"
                     "Automating enrollment and confirmation now...\n"
                     "Portal: https://alexreg.aast.edu/aastreg/"
                 )
-                print("[!] Slot open! Sending Telegram update & placing call...")
+                print("[!] Slot open! Sending Telegram group update & placing call...")
                 send_telegram_status(alert_msg)
                 make_twilio_call()
 
-                # 2. Select 10-K in the dropdown
+                # Select 10-K
                 print(f"[*] Selecting {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} in dropdown...")
                 ship_select_box.select_option(value=matched_stability_val)
                 page.wait_for_timeout(2000)
 
-                # 3. Confirm Registration
+                # Confirm Registration
                 print("[*] Clicking 'Confirm Registration'...")
                 confirm_btn = page.locator("#ctl00_ContentPlaceHolder1_lbtn_confirm, a:has-text('Confirm Registration')").first
                 confirm_btn.wait_for(state="attached", timeout=10000)
