@@ -137,14 +137,18 @@ def main():
             ship_row = page.locator("#ctl00_ContentPlaceHolder1_grdvw_courses tr:has(td:has-text('Ship Stability'))").first
 
             if ship_row.count() > 0:
-                current_grp_text = ship_row.inner_text().upper()
-                if TARGET_STABILITY_NUM in current_grp_text and TARGET_STABILITY_LETTER in current_grp_text:
-                    print("    => [OK] Ship Stability 10-K is ALREADY registered.")
-                    stability_already_registered = True
-                    stability_found = True
-                else:
-                    ship_select_box = ship_row.locator("select").first
-                    if ship_select_box.count() > 0:
+                ship_select_box = ship_row.locator("select").first
+                if ship_select_box.count() > 0:
+                    # 1. Check ONLY the currently active/selected option in the dropdown
+                    currently_selected_text = ship_select_box.evaluate("el => el.options[el.selectedIndex] ? el.options[el.selectedIndex].text : ''").upper()
+                    print(f"    Current Active Selection -> {currently_selected_text}")
+
+                    if TARGET_STABILITY_NUM in currently_selected_text and TARGET_STABILITY_LETTER in currently_selected_text:
+                        print("    => [OK] Ship Stability 10-K is ALREADY registered.")
+                        stability_already_registered = True
+                        stability_found = True
+                    else:
+                        # 2. Inspect available options to see if 10-K has opened up
                         options = ship_select_box.locator("option").all()
                         for opt in options:
                             txt = opt.inner_text().upper()
@@ -154,6 +158,7 @@ def main():
                                 stability_found = True
                                 print(f"    => [FOUND] Group {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} is available!")
                                 break
+
                     if not stability_found:
                         print(f"    => [UNAVAILABLE] {TARGET_STABILITY_NUM}-{TARGET_STABILITY_LETTER} not in Ship Stability options.")
             else:
@@ -167,7 +172,7 @@ def main():
                 print("[i] Nothing to do. Already registered.")
 
             elif stability_found and matched_stability_val and ship_select_box:
-                # 1. Alert immediately before triggering the clicks
+                # 1. Alert immediately before clicking
                 alert_msg = (
                     "🚨 SHIP STABILITY 10-K IS OPEN! 🚨\n\n"
                     "Automating enrollment and confirmation now...\n"
