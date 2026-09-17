@@ -28,7 +28,7 @@ jobs:
         env:
           AAST_REG_NUM: ${{ secrets.AAST_REG_NUM }}
           AAST_PIN: ${{ secrets.AAST_PIN }}
-          CALLMEBOT_USER: ${{ secrets.CALLMEBOT_USER }}
+          CALLMEBOT_GROUP_APIKEY: ${{ secrets.CALLMEBOT_GROUP_APIKEY }}
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
           TWILIO_API_KEY: ${{ secrets.TWILIO_API_KEY }}
           TWILIO_API_SECRET: ${{ secrets.TWILIO_API_SECRET }}
