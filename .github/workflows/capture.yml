@@ -1,0 +1,35 @@
+name: Capture Screenshot
+
+on:
+  workflow_dispatch: # Allows manual trigger from the GitHub UI
+  schedule:
+    - cron: '0 8 * * *' # Optional: runs daily at 08:00 UTC (remove if manual only)
+
+jobs:
+  take-screenshot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install chromium --with-deps
+
+      - name: Capture Page
+        run: node screenshot.js
+
+      - name: Upload Screenshot Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: page-screenshot
+          path: screenshot.png
+          retention-days: 7
