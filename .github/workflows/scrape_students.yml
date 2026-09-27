@@ -1,0 +1,50 @@
+name: Driving School Scraper
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch Location'
+        required: true
+        default: 'Charleston'
+      start_date:
+        description: 'Start Date (MM/DD/YYYY)'
+        required: true
+      end_date:
+        description: 'End Date (MM/DD/YYYY)'
+        required: true
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          pip install playwright pandas openpyxl pillow pymupdf
+          playwright install --with-deps chromium
+
+      - name: Run Scraper
+        env:
+          PORTAL_USER: ${{ secrets.PORTAL_USER }}
+          PORTAL_PASS: ${{ secrets.PORTAL_PASS }}
+          BRANCH_NAME: ${{ github.event.inputs.branch }}
+          START_DATE: ${{ github.event.inputs.start_date }}
+          END_DATE: ${{ github.event.inputs.end_date }}
+        run: |
+          python run_cloud_scraper.py
+
+      - name: Upload Student Packets Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: student-packets
+          path: temp_downloads/
+          retention-days: 1
