@@ -251,23 +251,41 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
 
       // 5b. Search Student
       console.log(`[STUDENT] Searching for "${student.lastName} ${student.firstName}"...`);
-      const activeCheckbox = page.locator('input.chk_SearchStudent_ActiveStudentOnly');
-      if (await activeCheckbox.count() > 0) {
-        const isChecked = await activeCheckbox.isChecked().catch(() => false);
-        if (!isChecked) {
-          await page.locator('.icheckbox_square-grey').first().click().catch(() => {});
-        }
-      }
 
+      // 1. Uncheck "ACTIVE STUDENTS ONLY" via the iCheck visual wrapper or label
+      const iCheckWrapper = page.locator('.icheckbox_square-grey');
+      if (await iCheckWrapper.count() > 0) {
+        // If it currently has the 'checked' class, click it to uncheck
+        const isChecked = await iCheckWrapper.first().evaluate(el => el.classList.contains('checked'));
+        if (isChecked) {
+          console.log('[STUDENT] Unchecking "ACTIVE STUDENTS ONLY"...');
+          await iCheckWrapper.first().click();
+          await waitDimmed(page);
+        }
+      } else {
+        // Fallback: click the text label
+        await page.locator('label:has-text("ACTIVE STUDENTS ONLY"), span:has-text("ACTIVE STUDENTS ONLY")').first().click().catch(() => {});
+      }
+      await snap(page, 'after_uncheck_active_only');
+
+      // 2. Clear input, click into it, and type characters sequentially to trigger Kendo UI AJAX
       const studentInput = page.locator('#studentList');
-      await studentInput.fill(`${student.lastName} ${student.firstName}`);
+      await studentInput.click();
+      await studentInput.fill(''); // clear any residual text
+      await page.waitForTimeout(300);
+
+      // Typing sequentially triggers keydown/keyup events needed by Kendo autocomplete
+      await studentInput.pressSequentially(`${student.lastName} ${student.firstName}`, { delay: 60 });
       await snap(page, `typed_student_${student.lastName}`);
 
-      const autocompleteItem = page.locator('ul#studentList_listbox li.k-item, li.k-item').first();
-      await autocompleteItem.waitFor({ state: 'visible', timeout: 15000 });
+      // 3. Wait for Kendo autocomplete dropdown to populate and select option
+      const autocompleteItem = page.locator('.k-animation-container ul li.k-item, #studentList_listbox li.k-item, li.k-item').first();
+      await autocompleteItem.waitFor({ state: 'visible', timeout: 20000 });
       await autocompleteItem.click();
       await snap(page, 'selected_autocomplete_item');
+      await waitDimmed(page);
 
+      // 4. Click Go
       await safeClick(page, 'a.btn.green[onclick*="RedirectToStudentAccountPage"], a:text-is("Go")', 'click_student_go');
       await waitDimmed(page);
       await snap(page, 'student_account_loaded');
