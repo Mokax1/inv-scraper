@@ -335,51 +335,33 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await waitDimmed(page);
       await snap(page, `billing_tab_loaded_${student.lastName}`);
 
-      // Click the header "PRINT" button in the BILLING header
+      // Click the PRINT button in the BILLING header
       console.log('[STUDENT] Opening Print Enrollments/Billing modal...');
       const billingHeaderPrintBtn = page.locator('#divBillingGrid a.btn.blue.btn-sm[onclick*="GetbillingAndEnrollmentForPrintGulAndEmail"], #divBillingGrid a:has-text("PRINT")').first();
       await billingHeaderPrintBtn.waitFor({ state: 'visible', timeout: 20000 });
       await billingHeaderPrintBtn.click();
-      await page.waitForTimeout(1000); // Allow modal animation to finish
+      await page.waitForTimeout(1000);
       await snap(page, `print_modal_opened_${student.lastName}`);
 
-      // Scope to the modal dialog
+      // Locate the modal and ensure the dynamic content container is rendered
       const modal = page.locator('#Print_Enroll_billing_info');
       await modal.waitFor({ state: 'visible', timeout: 15000 });
+      await modal.locator('#Receipt_BillingAndEnrollmentHtml').waitFor({ state: 'visible', timeout: 15000 });
 
-      // Ensure Enrollment column options are unchecked so only Billing is printed
-      const checkedEnrollment = modal.locator('.icheckbox_square-grey.checked').filter({
-        has: page.locator('input:not(.icheckBilling)')
-      });
-      const checkedEnrollmentCount = await checkedEnrollment.count();
-      for (let i = 0; i < checkedEnrollmentCount; i++) {
-        await checkedEnrollment.nth(i).click().catch(() => {});
+      // In the Billing column, target the last (oldest) checkbox row directly by its iCheck-helper or label
+      console.log('[STUDENT] Selecting the oldest receipt checkbox in the modal...');
+      const billingBoxes = modal.locator('.col-md-6').last().locator('.icheckbox_square-grey');
+      const billingBoxCount = await billingBoxes.count();
+      console.log(`[STUDENT] Found ${billingBoxCount} billing checkbox(es).`);
+
+      if (billingBoxCount > 0) {
+        // Click the last checkbox directly (oldest receipt)
+        await billingBoxes.last().click();
+      } else {
+        // Fallback: click the label containing the oldest date
+        await modal.locator('label').filter({ hasText: '$' }).last().click();
       }
-
-      // Handle Billing checkboxes: uncheck all except the oldest (last in list)
-      const billingCheckboxes = modal.locator('input.icheckBilling');
-      const billingCount = await billingCheckboxes.count();
-      console.log(`[STUDENT] Found ${billingCount} billing receipt checkbox(es) in modal.`);
-
-      if (billingCount > 0) {
-        // Uncheck all except the last
-        for (let i = 0; i < billingCount - 1; i++) {
-          const wrapper = modal.locator('.icheckbox_square-grey').filter({ has: billingCheckboxes.nth(i) });
-          const isChecked = await wrapper.evaluate(el => el.classList.contains('checked')).catch(() => false);
-          if (isChecked) {
-            await wrapper.click();
-            await page.waitForTimeout(200);
-          }
-        }
-
-        // Check the oldest (the last row)
-        const oldestWrapper = modal.locator('.icheckbox_square-grey').filter({ has: billingCheckboxes.nth(billingCount - 1) });
-        const isOldestChecked = await oldestWrapper.evaluate(el => el.classList.contains('checked')).catch(() => false);
-        if (!isOldestChecked) {
-          await oldestWrapper.click();
-          await page.waitForTimeout(200);
-        }
-      }
+      await page.waitForTimeout(400);
       await snap(page, `modal_selected_oldest_${student.lastName}`);
 
       // Click PRINT in the modal footer and catch the new receipt tab
@@ -400,7 +382,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       console.log(`[STUDENT] Generated billing PDF: ${studentDocs.billingPath}`);
       await printPage.close();
 
-      // Close the modal dialog if it remained open
+      // Close the modal dialog
       const closeBtn = modal.locator('button[data-dismiss="modal"]:has-text("CLOSE"), button:has-text("CLOSE")').first();
       if (await closeBtn.isVisible().catch(() => false)) {
         await closeBtn.click();
