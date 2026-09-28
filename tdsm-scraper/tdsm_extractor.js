@@ -4,7 +4,6 @@ import { PDFDocument, degrees } from 'pdf-lib';
 import fs from 'fs';
 import path from 'path';
 
-
 // Artifact storage directories
 const SCREENSHOT_DIR = path.resolve('screenshots');
 const OUTPUT_DIR = path.resolve('output');
@@ -74,7 +73,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     }
   }
 
- // 2. Permit Photo (rotated 90° clockwise to orient upright, centered cleanly on a single letter page)
+  // 2. Permit Photo (rotated clockwise to be upright, centered cleanly on a single letter page)
   if (permitPath && fs.existsSync(permitPath)) {
     try {
       const imgBuffer = fs.readFileSync(permitPath);
@@ -90,7 +89,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       const maxWidth = 612 - margin * 2;
       const maxHeight = 792 - margin * 2;
 
-      // Because the image is oriented sideways, its bounding dimensions swap
+      // Because the image is oriented sideways, its dimensions swap
       const scale = Math.min(maxWidth / img.height, maxHeight / img.width, 1);
       const renderW = img.width * scale;
       const renderH = img.height * scale;
@@ -98,8 +97,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       const centerX = 612 / 2;
       const centerY = 792 / 2;
 
-      // Rotate 90 degrees clockwise (degrees(-90))
-      // Origin translation places the rotated box at the exact center of the page
+      // Rotate 90° clockwise (degrees(-90)) with proper origin shift
       page.drawImage(img, {
         x: centerX - renderH / 2,
         y: centerY - renderW / 2 + renderW,
@@ -108,7 +106,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
         rotate: degrees(-90),
       });
 
-      console.log(`[MERGE] Embedded rotated permit image for ${studentName}`);
+      console.log(`[MERGE] Embedded upright permit image for ${studentName}`);
     } catch (err) {
       console.error(`[MERGE ERROR] Failed embedding permit image: ${err.message}`);
     }
@@ -216,7 +214,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     await downloadEvent.saveAs(excelFilePath);
     console.log(`[STEP 4] Downloaded file to: ${excelFilePath}`);
 
-    // Parse Excel with SheetJS (bypasses XML BOM issues)
+    // Parse Excel with SheetJS
     const fileBuffer = fs.readFileSync(excelFilePath);
     const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
@@ -224,7 +222,6 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
     const students = [];
-    // Row 0 is header: ['First Name', 'Last Name', ...]
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       if (!row || row.length === 0) continue;
@@ -239,12 +236,16 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       }
     }
 
-    console.log(`[INFO] Found ${students.length} student(s) to process.`);
+    const totalStudents = students.length;
+    console.log(`[INFO] Found ${totalStudents} student(s) to process.`);
 
     // 5. Loop Students
-    for (const student of students) {
+    for (let idx = 0; idx < totalStudents; idx++) {
+      const student = students[idx];
+      const currentNum = idx + 1;
+
       console.log(`\n======================================================`);
-      console.log(`[PROCESSING] Student: ${student.fullName}`);
+      console.log(`[PROGRESS] ${currentNum}/${totalStudents} | ${student.fullName} | Initializing profile`);
       console.log(`======================================================`);
 
       const studentDocs = {
@@ -259,12 +260,9 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await waitDimmed(page);
 
       // 5b. Search Student
-      console.log(`[STUDENT] Searching for "${student.lastName} ${student.firstName}"...`);
-
-      // 1. Uncheck "ACTIVE STUDENTS ONLY" via the iCheck visual wrapper or label
+      console.log(`[PROGRESS] ${currentNum}/${totalStudents} | ${student.fullName} | Locating student record`);
       const iCheckWrapper = page.locator('.icheckbox_square-grey');
       if (await iCheckWrapper.count() > 0) {
-        // If it currently has the 'checked' class, click it to uncheck
         const isChecked = await iCheckWrapper.first().evaluate(el => el.classList.contains('checked'));
         if (isChecked) {
           console.log('[STUDENT] Unchecking "ACTIVE STUDENTS ONLY"...');
@@ -272,34 +270,30 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
           await waitDimmed(page);
         }
       } else {
-        // Fallback: click the text label
         await page.locator('label:has-text("ACTIVE STUDENTS ONLY"), span:has-text("ACTIVE STUDENTS ONLY")').first().click().catch(() => {});
       }
       await snap(page, 'after_uncheck_active_only');
 
-      // 2. Clear input, click into it, and type characters sequentially to trigger Kendo UI AJAX
       const studentInput = page.locator('#studentList');
       await studentInput.click();
-      await studentInput.fill(''); // clear any residual text
+      await studentInput.fill('');
       await page.waitForTimeout(300);
 
-      // Typing sequentially triggers keydown/keyup events needed by Kendo autocomplete
       await studentInput.pressSequentially(`${student.lastName} ${student.firstName}`, { delay: 60 });
       await snap(page, `typed_student_${student.lastName}`);
 
-      // 3. Wait for Kendo autocomplete dropdown to populate and select option
       const autocompleteItem = page.locator('.k-animation-container ul li.k-item, #studentList_listbox li.k-item, li.k-item').first();
       await autocompleteItem.waitFor({ state: 'visible', timeout: 20000 });
       await autocompleteItem.click();
       await snap(page, 'selected_autocomplete_item');
       await waitDimmed(page);
 
-      // 4. Click Go
       await safeClick(page, 'a.btn.green[onclick*="RedirectToStudentAccountPage"], a:text-is("Go")', 'click_student_go');
       await waitDimmed(page);
       await snap(page, 'student_account_loaded');
 
       // 5c. Files Tab
+      console.log(`[PROGRESS] ${currentNum}/${totalStudents} | ${student.fullName} | Compiling contract & driver permit`);
       await safeClick(page, 'strong.text-uppercase:has-text("Files"), a[href*="Files"]', 'click_files_tab');
       await waitDimmed(page);
 
@@ -336,15 +330,15 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
         console.log(`[STUDENT] Saved permit: ${studentDocs.permitPath}`);
       }
 
-   // 5d. Enrollment / Billing Receipt via Modal Print
-      console.log('[STUDENT] Navigating to Enrollment/Billing tab...');
+      // 5d. Enrollment / Billing Receipt via Modal Print
+      console.log(`[PROGRESS] ${currentNum}/${totalStudents} | ${student.fullName} | Generating verified receipt`);
       const billingTab = page.locator('ul.nav-tabs a.tabBillingEnrollment[href="#tb_billing"], a[onclick*="_FetchEnrollmentBillingView"]');
       await billingTab.waitFor({ state: 'visible', timeout: 15000 });
       await billingTab.click();
       await waitDimmed(page);
       await snap(page, `billing_tab_loaded_${student.lastName}`);
 
-      // Click the PRINT button in the BILLING header
+      // Open Print Modal
       console.log('[STUDENT] Opening Print Enrollments/Billing modal...');
       const billingHeaderPrintBtn = page.locator('#divBillingGrid a.btn.blue.btn-sm[onclick*="GetbillingAndEnrollmentForPrintGulAndEmail"], #divBillingGrid a:has-text("PRINT")').first();
       await billingHeaderPrintBtn.waitFor({ state: 'visible', timeout: 20000 });
@@ -352,31 +346,23 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await page.waitForTimeout(1000);
       await snap(page, `print_modal_opened_${student.lastName}`);
 
-      // Locate the modal and ensure the dynamic content container is rendered
       const modal = page.locator('#Print_Enroll_billing_info');
       await modal.waitFor({ state: 'visible', timeout: 15000 });
       await modal.locator('#Receipt_BillingAndEnrollmentHtml').waitFor({ state: 'visible', timeout: 15000 });
 
-      // In the Billing column, target the last (oldest) checkbox row directly by its iCheck-helper or label
-      console.log('[STUDENT] Selecting the oldest receipt checkbox in the modal...');
+      // Target oldest billing checkbox (last item in right column)
+      console.log('[STUDENT] Selecting oldest receipt checkbox...');
       const billingBoxes = modal.locator('.col-md-6').last().locator('.icheckbox_square-grey');
       const billingBoxCount = await billingBoxes.count();
-      console.log(`[STUDENT] Found ${billingBoxCount} billing checkbox(es).`);
-
       if (billingBoxCount > 0) {
-        // Click the last checkbox directly (oldest receipt)
         await billingBoxes.last().click();
       } else {
-        // Fallback: click the label containing the oldest date
         await modal.locator('label').filter({ hasText: '$' }).last().click();
       }
       await page.waitForTimeout(400);
       await snap(page, `modal_selected_oldest_${student.lastName}`);
 
-      // Click PRINT in the modal footer and catch the new receipt tab
-      console.log('[STUDENT] Triggering receipt print in modal...');
       const modalPrintBtn = modal.locator('a.btn.green[onclick*="GetReceiptofEnrollmentAndBilling"], a.btn.green:has-text("PRINT")').first();
-
       const [printPage] = await Promise.all([
         context.waitForEvent('page', { timeout: 30000 }),
         modalPrintBtn.click(),
@@ -385,13 +371,11 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await printPage.waitForLoadState('networkidle');
       await snap(printPage, `receipt_opened_${student.lastName}`);
 
-      // Generate the clean PDF from the print page
       studentDocs.billingPath = path.join(DOWNLOADS_DIR, `${student.lastName}_billing_receipt.pdf`);
       await printPage.pdf({ path: studentDocs.billingPath, format: 'Letter', printBackground: true });
       console.log(`[STUDENT] Generated billing PDF: ${studentDocs.billingPath}`);
       await printPage.close();
 
-      // Close the modal dialog
       const closeBtn = modal.locator('button[data-dismiss="modal"]:has-text("CLOSE"), button:has-text("CLOSE")').first();
       if (await closeBtn.isVisible().catch(() => false)) {
         await closeBtn.click();
@@ -400,38 +384,33 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       }
       await waitDimmed(page);
 
-   // 5e. Report Center -> Class D Log
-      console.log(`[STUDENT] Fetching Class D Log for ${student.fullName}...`);
+      // 5e. Report Center -> Class D Log
+      console.log(`[PROGRESS] ${currentNum}/${totalStudents} | ${student.fullName} | Retrieving official Class D Log`);
       await safeClick(page, '#ReportCenterSideMenu > a, a:has-text("Report Center")', 'open_report_center');
       await safeClick(page, '#rc_SCStateFormsReports a, a:has-text("SC Reports/Forms")', 'click_sc_reports');
       await waitDimmed(page);
 
-      // Target Class D LOG specifically using data-type="2"
+      // Class D LOG card specifically
       const classDCard = page.locator('a.ClsType[data-type="2"]').first();
       await classDCard.waitFor({ state: 'visible', timeout: 20000 });
       await classDCard.click();
       await waitDimmed(page);
       await page.waitForTimeout(800);
 
-      // Verify the Class D Log modal opened
       await snap(page, `opened_class_d_modal_${student.lastName}`);
 
-      // Enter student last name
       const searchBox = page.locator('#txt_SCStateForms_TempAuthForm_SearchStudentByLastName');
       await searchBox.waitFor({ state: 'visible', timeout: 15000 });
       await searchBox.fill(student.lastName);
 
-      // Click Filter
       const filterBtn = page.locator('#btn_WAStateForms_TempAuthForm_FetchStudentByLastName');
       await filterBtn.click();
       await waitDimmed(page);
       await page.waitForTimeout(1000);
 
-      // Select student from #select_SCStateForms_StudentsList_TempAuthForm
       const studentsSelect = page.locator('#select_SCStateForms_StudentsList_TempAuthForm');
       await studentsSelect.waitFor({ state: 'visible', timeout: 15000 });
 
-      // Match "LastName, FirstName"
       const targetOption = studentsSelect.locator('option').filter({
         hasText: new RegExp(`^\\s*${student.lastName},\\s*${student.firstName}`, 'i')
       }).first();
@@ -440,7 +419,6 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       if (await targetOption.count() > 0) {
         targetVal = await targetOption.getAttribute('value');
       } else {
-        // Fallback: match any option containing both last and first name
         const allOptions = await studentsSelect.locator('option').all();
         for (const opt of allOptions) {
           const txt = (await opt.textContent()).toLowerCase();
@@ -461,7 +439,6 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await page.waitForTimeout(400);
       await snap(page, `selected_class_d_${student.lastName}`);
 
-      // Click Create PDF
       const [classDDownload] = await Promise.all([
         page.waitForEvent('download', { timeout: 35000 }),
         safeClick(page, '#btn_SCStateForms_Download_TempAuthFrom', 'click_create_pdf_class_d'),
@@ -471,7 +448,6 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await classDDownload.saveAs(studentDocs.classDPath);
       console.log(`[STUDENT] Saved Class D Log: ${studentDocs.classDPath}`);
 
-      // Close modal
       const modalClose = page.locator('#modal_WAStateForms_TempAuthForm button[data-dismiss="modal"]:has-text("CLOSE"), #modal_WAStateForms_TempAuthForm button.close').first();
       if (await modalClose.isVisible().catch(() => false)) {
         await modalClose.click();
@@ -480,7 +456,8 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       }
       await waitDimmed(page);
 
-      // 5f. Merge PDFs
+      // 5f. Merge Final Packet
+      console.log(`[PROGRESS] ${currentNum}/${totalStudents} | ${student.fullName} | Compiling unified PDF packet`);
       await assembleStudentPdf(student.fullName, studentDocs);
     }
 
