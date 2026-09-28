@@ -1,8 +1,9 @@
 import { chromium } from 'playwright';
 import * as XLSX from 'xlsx';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, degrees } from 'pdf-lib';
 import fs from 'fs';
 import path from 'path';
+
 
 // Artifact storage directories
 const SCREENSHOT_DIR = path.resolve('screenshots');
@@ -73,33 +74,43 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     }
   }
 
-  // 2. Permit Photo (scaled to fit single letter page)
+ // 2. Permit Photo (rotated 90° to the left, centered cleanly on a single letter page)
   if (permitPath && fs.existsSync(permitPath)) {
     try {
       const imgBuffer = fs.readFileSync(permitPath);
       let img;
-      if (permitPath.endsWith('.png')) {
+      if (permitPath.toLowerCase().endsWith('.png')) {
         img = await finalDoc.embedPng(imgBuffer);
       } else {
         img = await finalDoc.embedJpg(imgBuffer);
       }
 
-      const page = finalDoc.addPage([612, 792]);
+      const page = finalDoc.addPage([612, 792]); // Standard US Letter
       const margin = 40;
       const maxWidth = 612 - margin * 2;
       const maxHeight = 792 - margin * 2;
 
-      const scale = Math.min(maxWidth / img.width, maxHeight / img.height, 1);
+      // Because the image is rotated 90° to the left, its rendered width is img.height,
+      // and its rendered height is img.width.
+      const scale = Math.min(maxWidth / img.height, maxHeight / img.width, 1);
       const renderW = img.width * scale;
       const renderH = img.height * scale;
 
+      // When rotating 90° counter-clockwise (degrees(90)), the bottom-left corner of the
+      // rotated bounding box sits at: (x - renderH, y).
+      // We calculate (x, y) so the final rotated bounding box is centered on the page.
+      const centerX = 612 / 2;
+      const centerY = 792 / 2;
+
       page.drawImage(img, {
-        x: (612 - renderW) / 2,
-        y: (792 - renderH) / 2,
+        x: centerX - renderH / 2 + renderH,
+        y: centerY - renderW / 2,
         width: renderW,
         height: renderH,
+        rotate: degrees(90),
       });
-      console.log(`[MERGE] Embedded permit image for ${studentName}`);
+
+      console.log(`[MERGE] Embedded rotated permit image for ${studentName}`);
     } catch (err) {
       console.error(`[MERGE ERROR] Failed embedding permit image: ${err.message}`);
     }
