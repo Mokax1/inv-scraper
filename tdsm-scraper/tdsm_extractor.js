@@ -74,7 +74,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     }
   }
 
- // 2. Permit Photo (rotated 90° to the left, centered cleanly on a single letter page)
+ // 2. Permit Photo (rotated 90° clockwise to orient upright, centered cleanly on a single letter page)
   if (permitPath && fs.existsSync(permitPath)) {
     try {
       const imgBuffer = fs.readFileSync(permitPath);
@@ -90,24 +90,22 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       const maxWidth = 612 - margin * 2;
       const maxHeight = 792 - margin * 2;
 
-      // Because the image is rotated 90° to the left, its rendered width is img.height,
-      // and its rendered height is img.width.
+      // Because the image is oriented sideways, its bounding dimensions swap
       const scale = Math.min(maxWidth / img.height, maxHeight / img.width, 1);
       const renderW = img.width * scale;
       const renderH = img.height * scale;
 
-      // When rotating 90° counter-clockwise (degrees(90)), the bottom-left corner of the
-      // rotated bounding box sits at: (x - renderH, y).
-      // We calculate (x, y) so the final rotated bounding box is centered on the page.
       const centerX = 612 / 2;
       const centerY = 792 / 2;
 
+      // Rotate 90 degrees clockwise (degrees(-90))
+      // Origin translation places the rotated box at the exact center of the page
       page.drawImage(img, {
-        x: centerX - renderH / 2 + renderH,
-        y: centerY - renderW / 2,
+        x: centerX - renderH / 2,
+        y: centerY - renderW / 2 + renderW,
         width: renderW,
         height: renderH,
-        rotate: degrees(90),
+        rotate: degrees(-90),
       });
 
       console.log(`[MERGE] Embedded rotated permit image for ${studentName}`);
