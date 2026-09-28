@@ -17,19 +17,25 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install dependencies from custom package file
+      - name: Setup isolated scraper dependencies
+        working-directory: tdsm-scraper
         run: |
-          cd tdsm-scraper
-          npm install --package-lock-only=false --prefix . $(node -e "const pkg=require('./tdsm_package.json'); console.log(Object.entries(pkg.dependencies).map(([k,v])=>k+'@'+v).join(' '))")
+          # Copy custom package to subfolder package.json so Node detects type: module
+          cp tdsm_package.json package.json
+          npm install
 
       - name: Install Playwright browsers & OS dependencies
-        run: npx playwright install --with-deps chromium
+        working-directory: tdsm-scraper
+        run: |
+          # Run install directly from the local node_modules binary
+          npx playwright install chromium --with-deps
 
       - name: Run Scraper
+        working-directory: tdsm-scraper
         env:
           PORTAL_USER: ${{ secrets.PORTAL_USER }}
           PORTAL_PASS: ${{ secrets.PORTAL_PASS }}
-        run: node tdsm-scraper/tdsm_extractor.js
+        run: node tdsm_extractor.js
 
       - name: Upload Step Screenshots (Debug Artifact)
         if: always()
