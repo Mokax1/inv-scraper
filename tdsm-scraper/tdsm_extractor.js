@@ -141,6 +141,86 @@ async function safeClick(page, selector, stepLabel, maxRetries = 3) {
   }
 }
 
+// --- date range helpers ---------------------------------------------------
+// The desktop app passes START_DATE / END_DATE (YYYY-MM-DD) through the workflow.
+// Without them (scheduled or manual runs) the last 7 days ending today are used.
+const MONTH_NAMES = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+
+function parseIsoDate(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || '').trim());
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const check = new Date(Date.UTC(year, month - 1, day));
+  if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) return null;
+  return { year, month, day };
+}
+
+const dateKey = (d) => d.year * 10000 + d.month * 100 + d.day;
+const formatDate = (d) => `${String(d.month).padStart(2, '0')}/${String(d.day).padStart(2, '0')}/${d.year}`;
+
+function shiftDate(d, days) {
+  const t = new Date(Date.UTC(d.year, d.month - 1, d.day + days));
+  return { year: t.getUTCFullYear(), month: t.getUTCMonth() + 1, day: t.getUTCDate() };
+}
+
+function resolveDateRange(env = process.env) {
+  const startRaw = (env.START_DATE || '').trim();
+  const endRaw = (env.END_DATE || '').trim();
+
+  if (startRaw || endRaw) {
+    const start = parseIsoDate(startRaw);
+    const end = parseIsoDate(endRaw);
+    if (!start || !end) {
+      throw new Error(`START_DATE and END_DATE must both be valid YYYY-MM-DD dates (got "${startRaw}" and "${endRaw}")`);
+    }
+    if (dateKey(end) < dateKey(start)) {
+      throw new Error(`END_DATE (${endRaw}) is before START_DATE (${startRaw})`);
+    }
+    return { start, end, source: 'app' };
+  }
+
+  // Fallback: last 7 days ending today, using US Eastern time
+  const todayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+  const now = new Date();
+  const end = parseIsoDate(todayIso) ||
+    { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1, day: now.getUTCDate() };
+  return { start: shiftDate(end, -6), end, source: 'default (last 7 days)' };
+}
+
+// Opens a bootstrap-datepicker, pages to the right month/year, then clicks the day.
+async function pickDate(page, pickerSelector, label, target) {
+  await safeClick(page, pickerSelector, `open_${label}_datepicker`);
+  const dropdown = page.locator('.datepicker-dropdown:visible').first();
+  const header = dropdown.locator('th.datepicker-switch').first();
+  const wanted = target.year * 12 + (target.month - 1);
+
+  for (let i = 0; i < 60; i++) {
+    const text = ((await header.textContent({ timeout: 10000 })) || '').trim().toLowerCase();
+    const [monthName, yearText] = text.split(/\s+/);
+    const monthIdx = MONTH_NAMES.indexOf(monthName);
+    const year = parseInt(yearText, 10);
+    if (monthIdx < 0 || Number.isNaN(year)) {
+      throw new Error(`Unrecognized datepicker header "${text}"`);
+    }
+
+    const shown = year * 12 + monthIdx;
+    if (shown === wanted) {
+      const cell = dropdown.locator(`td.day:not(.old):not(.new):text-is("${target.day}")`).first();
+      await cell.click();
+      console.log(`[ACTION] Picked ${label} date: ${formatDate(target)}`);
+      await waitDimmed(page);
+      return;
+    }
+
+    await dropdown.locator(shown > wanted ? 'th.prev' : 'th.next').first().click();
+    await page.waitForTimeout(SLEEP_SHORT_MS);
+  }
+  throw new Error(`Could not navigate the datepicker to ${formatDate(target)}`);
+}
+// --- end date range helpers -----------------------------------------------
+
 async function assembleStudentPdf(studentName, { contractPath, permitPath, billingPath, classDPath }) {
   const finalDoc = await PDFDocument.create();
 
@@ -243,6 +323,14 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     process.exit(1);
   }
 
+  let dateRange;
+  try {
+    dateRange = resolveDateRange();
+  } catch (err) {
+    console.error(`[FATAL ERROR]: ${err.message}`);
+    process.exit(1);
+  }
+
   const browser = await chromium.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -288,19 +376,10 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     await safeClick(page, 'a.reportstudenteventlog[data-reportid="4"], a:has-text("All BTW Hours Completed")', 'click_btw_hours_report');
     await waitDimmed(page);
 
-    // Pick Start Date (21 Sep)
-    console.log('[STEP 3] Setting start date (21 Sep)...');
-    await safeClick(page, '#startDatePicker_reportBTWHoursCompleted', 'open_start_datepicker');
-    const startCell = page.locator('.datepicker-dropdown:visible td.day:not(.old):not(.new):text-is("21")').first();
-    await startCell.click();
-    await waitDimmed(page);
-
-    // Pick End Date (28 Sep)
-    console.log('[STEP 3] Setting end date (28 Sep)...');
-    await safeClick(page, '#endDatePicker_reportBTWHoursCompleted', 'open_end_datepicker');
-    const endCell = page.locator('.datepicker-dropdown:visible td.day:not(.old):not(.new):text-is("28")').first();
-    await endCell.click();
-    await waitDimmed(page);
+    // Pick the date range chosen in the desktop app (default: last 7 days)
+    console.log(`[STEP 3] Report range: ${formatDate(dateRange.start)} to ${formatDate(dateRange.end)} [${dateRange.source}]`);
+    await pickDate(page, '#startDatePicker_reportBTWHoursCompleted', 'start', dateRange.start);
+    await pickDate(page, '#endDatePicker_reportBTWHoursCompleted', 'end', dateRange.end);
 
     // 4. Download Excel Report
     console.log('[STEP 4] Exporting BTW report to Excel...');
