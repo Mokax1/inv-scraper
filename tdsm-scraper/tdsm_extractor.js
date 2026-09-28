@@ -13,6 +13,68 @@ const DOWNLOADS_DIR = path.resolve('downloads');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
+
+// ---------------------------------------------------------------------------
+// Live progress reporting
+// Posts each [PROGRESS] line to a GitHub "check run" so the desktop app can show
+// it live (GitHub's job-log API returns 404 until a job finishes).
+// Needs `checks: write` permission + GITHUB_TOKEN in the workflow. Outside GitHub
+// Actions (or if anything fails) it silently falls back to console output only.
+// ---------------------------------------------------------------------------
+const PROGRESS_CHECK_NAME = 'student-progress';
+let progressCheckId = null;
+
+function githubApi(pathname, method, body) {
+  const { GITHUB_TOKEN, GITHUB_REPOSITORY } = process.env;
+  return fetch(`https://api.github.com/repos/${GITHUB_REPOSITORY}${pathname}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${GITHUB_TOKEN}`,
+      Accept: 'application/vnd.github+json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(8000),
+  });
+}
+
+async function reportProgress(line) {
+  console.log(`[PROGRESS] ${line}`);
+  const { GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_SHA } = process.env;
+  if (!GITHUB_TOKEN || !GITHUB_REPOSITORY || !GITHUB_SHA) return;
+
+  const output = { title: line.slice(0, 250), summary: line };
+  try {
+    if (!progressCheckId) {
+      const res = await githubApi('/check-runs', 'POST', {
+        name: PROGRESS_CHECK_NAME,
+        head_sha: GITHUB_SHA,
+        status: 'in_progress',
+        started_at: new Date().toISOString(),
+        output,
+      });
+      if (res.ok) progressCheckId = (await res.json()).id;
+      else console.warn(`[PROGRESS WARN] check-run create failed: ${res.status}`);
+    } else {
+      const res = await githubApi(`/check-runs/${progressCheckId}`, 'PATCH', { output });
+      if (!res.ok) console.warn(`[PROGRESS WARN] check-run update failed: ${res.status}`);
+    }
+  } catch (err) {
+    console.warn(`[PROGRESS WARN] ${err.message}`);
+  }
+}
+
+async function finishProgress() {
+  if (!progressCheckId) return;
+  try {
+    await githubApi(`/check-runs/${progressCheckId}`, 'PATCH', {
+      status: 'completed',
+      conclusion: 'neutral',
+      completed_at: new Date().toISOString(),
+    });
+  } catch (_) {}
+}
+
 let stepCounter = 1;
 
 async function snap(page, stepName) {
@@ -245,7 +307,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       const currentNum = idx + 1;
 
       console.log(`\n======================================================`);
-      console.log(`[PROGRESS] ${currentNum}/${totalStudents} | ${student.fullName} | Initializing profile`);
+      await reportProgress(`${currentNum}/${totalStudents} | ${student.fullName} | Initializing profile`);
       console.log(`======================================================`);
 
       const studentDocs = {
@@ -260,7 +322,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await waitDimmed(page);
 
       // 5b. Search Student
-      console.log(`[PROGRESS] ${currentNum}/${totalStudents} | ${student.fullName} | Locating student record`);
+      await reportProgress(`${currentNum}/${totalStudents} | ${student.fullName} | Locating student record`);
       const iCheckWrapper = page.locator('.icheckbox_square-grey');
       if (await iCheckWrapper.count() > 0) {
         const isChecked = await iCheckWrapper.first().evaluate(el => el.classList.contains('checked'));
@@ -293,7 +355,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await snap(page, 'student_account_loaded');
 
       // 5c. Files Tab
-      console.log(`[PROGRESS] ${currentNum}/${totalStudents} | ${student.fullName} | Compiling contract & driver permit`);
+      await reportProgress(`${currentNum}/${totalStudents} | ${student.fullName} | Compiling contract & driver permit`);
       await safeClick(page, 'strong.text-uppercase:has-text("Files"), a[href*="Files"]', 'click_files_tab');
       await waitDimmed(page);
 
@@ -331,7 +393,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       }
 
       // 5d. Enrollment / Billing Receipt via Modal Print
-      console.log(`[PROGRESS] ${currentNum}/${totalStudents} | ${student.fullName} | Generating verified receipt`);
+      await reportProgress(`${currentNum}/${totalStudents} | ${student.fullName} | Generating verified receipt`);
       const billingTab = page.locator('ul.nav-tabs a.tabBillingEnrollment[href="#tb_billing"], a[onclick*="_FetchEnrollmentBillingView"]');
       await billingTab.waitFor({ state: 'visible', timeout: 15000 });
       await billingTab.click();
@@ -385,7 +447,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await waitDimmed(page);
 
       // 5e. Report Center -> Class D Log
-      console.log(`[PROGRESS] ${currentNum}/${totalStudents} | ${student.fullName} | Retrieving official Class D Log`);
+      await reportProgress(`${currentNum}/${totalStudents} | ${student.fullName} | Retrieving official Class D Log`);
       await safeClick(page, '#ReportCenterSideMenu > a, a:has-text("Report Center")', 'open_report_center');
       await safeClick(page, '#rc_SCStateFormsReports a, a:has-text("SC Reports/Forms")', 'click_sc_reports');
       await waitDimmed(page);
@@ -457,7 +519,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await waitDimmed(page);
 
       // 5f. Merge Final Packet
-      console.log(`[PROGRESS] ${currentNum}/${totalStudents} | ${student.fullName} | Compiling unified PDF packet`);
+      await reportProgress(`${currentNum}/${totalStudents} | ${student.fullName} | Compiling unified PDF packet`);
       await assembleStudentPdf(student.fullName, studentDocs);
     }
 
@@ -467,6 +529,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     await snap(page, 'fatal_crash_state');
     process.exitCode = 1;
   } finally {
+    await finishProgress();
     await browser.close();
   }
 })();
