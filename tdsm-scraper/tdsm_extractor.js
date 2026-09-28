@@ -335,27 +335,29 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await waitDimmed(page);
       await snap(page, `billing_tab_loaded_${student.lastName}`);
 
-      // Scope directly inside the BILLING panel (the panel with heading "BILLING:")
-      const billingContainer = page.locator('.col-md-6, .col-sm-12, div')
-        .filter({ has: page.locator('h4, strong, div, span', { hasText: 'BILLING:' }) })
-        .first();
-
-      // Find the billing grid rows (first row contains the oldest receipt)
-      const billingRows = billingContainer.locator('table tbody tr').filter({ has: page.locator('a.btn.blue, a:has-text("EDIT")') });
-      await billingRows.first().waitFor({ state: 'visible', timeout: 25000 });
-
+      // Locate the Billing table container specifically
+      // In TDSM, the two grids are #tblEnrollment and #tblBilling (or wrapped inside #dvBillingGrid)
       console.log('[STUDENT] Targeting oldest receipt in Billing table (row 1)...');
-      const oldestBillingRow = billingRows.first();
 
-      // Click the EDIT dropdown inside this specific billing row
-      const editDropdown = oldestBillingRow.locator('a.btn.blue[data-toggle="dropdown"], a:has-text("EDIT")').first();
-      await editDropdown.click();
+      // Click the Edit button of the first row in the billing table
+      // The billing container is the second column panel (.col-md-6) or explicitly marked by "BILLING:"
+      const billingPanel = page.locator('.col-md-6, .col-sm-12').filter({ hasText: 'BILLING:' }).first();
+      await billingPanel.waitFor({ state: 'visible', timeout: 20000 });
+
+      const billingEditBtn = billingPanel.locator('tbody tr').first().locator('a.btn.blue, a:has-text("EDIT")');
+      await billingEditBtn.waitFor({ state: 'visible', timeout: 20000 });
+      await billingEditBtn.click();
+      await page.waitForTimeout(500); // Give the bootstrap dropdown animation 500ms
       await snap(page, `billing_edit_dropdown_opened_${student.lastName}`);
 
-      // Click Print from the opened dropdown menu and catch the popup receipt window
-      const printLink = oldestBillingRow.locator('ul.dropdown-menu a[onclick*="GetReceiptofEnrollmentAndBillingFromGridRow"], ul.dropdown-menu a:has-text("Print")').first();
+      // The active/open dropdown menu in the page:
+      const printLink = page.locator('.dropdown-menu:visible a[onclick*="billing"], .open > .dropdown-menu a:has-text("Print"), a:visible:has-text("Print")')
+        .filter({ hasText: 'Print' })
+        .first();
+
       await printLink.waitFor({ state: 'visible', timeout: 15000 });
 
+      // Click Print and intercept the new tab/window
       const [printPage] = await Promise.all([
         context.waitForEvent('page', { timeout: 30000 }),
         printLink.click(),
@@ -364,7 +366,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await printPage.waitForLoadState('networkidle');
       await snap(printPage, `billing_receipt_page_${student.lastName}`);
 
-      // Save the receipt as a clean PDF
+      // Generate PDF
       studentDocs.billingPath = path.join(DOWNLOADS_DIR, `${student.lastName}_billing_receipt.pdf`);
       await printPage.pdf({ path: studentDocs.billingPath, format: 'Letter', printBackground: true });
       console.log(`[STUDENT] Generated billing PDF: ${studentDocs.billingPath}`);
