@@ -20,14 +20,12 @@ jobs:
       - name: Setup isolated scraper dependencies
         working-directory: tdsm-scraper
         run: |
-          # Copy custom package to subfolder package.json so Node detects type: module
           cp tdsm_package.json package.json
           npm install
 
       - name: Install Playwright browsers & OS dependencies
         working-directory: tdsm-scraper
         run: |
-          # Run install directly from the local node_modules binary
           npx playwright install chromium --with-deps
 
       - name: Run Scraper
@@ -43,6 +41,7 @@ jobs:
         with:
           name: portal-flow-screenshots
           path: tdsm-scraper/screenshots/
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Upload Compiled Student PDFs
@@ -51,4 +50,5 @@ jobs:
         with:
           name: student-packets
           path: tdsm-scraper/output/
+          if-no-files-found: ignore
           retention-days: 30
