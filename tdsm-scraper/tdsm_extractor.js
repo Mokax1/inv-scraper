@@ -4,11 +4,10 @@ import { PDFDocument } from 'pdf-lib';
 import fs from 'fs';
 import path from 'path';
 
-// Store all artifacts inside tdsm-scraper to keep repository clean
-const BASE_DIR = path.resolve('tdsm-scraper');
-const SCREENSHOT_DIR = path.join(BASE_DIR, 'screenshots');
-const OUTPUT_DIR = path.join(BASE_DIR, 'output');
-const DOWNLOADS_DIR = path.join(BASE_DIR, 'downloads');
+// Use current working directory directly so artifacts save right into ./screenshots & ./output
+const SCREENSHOT_DIR = path.resolve('screenshots');
+const OUTPUT_DIR = path.resolve('output');
+const DOWNLOADS_DIR = path.resolve('downloads');
 
 [SCREENSHOT_DIR, OUTPUT_DIR, DOWNLOADS_DIR].forEach((dir) => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -16,9 +15,6 @@ const DOWNLOADS_DIR = path.join(BASE_DIR, 'downloads');
 
 let stepCounter = 1;
 
-/**
- * Captures visual proof at each step for debugging GitHub Actions artifacts
- */
 async function snap(page, stepName) {
   const safeName = `${String(stepCounter++).padStart(3, '0')}_${stepName.replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
   const filePath = path.join(SCREENSHOT_DIR, safeName);
@@ -30,31 +26,27 @@ async function snap(page, stepName) {
   }
 }
 
-/**
- * Handles portal modal masks (.fade / .modal-backdrop / Metronic loader overlays)
- */
 async function waitDimmed(page, timeoutMs = 70000) {
   console.log('[SPINNER] Waiting for loading backdrop/fade to vanish...');
   try {
+    // Wait until .fade is either gone or has no display
     await page.waitForSelector('.fade', { state: 'hidden', timeout: timeoutMs }).catch(() => {});
     await page.waitForSelector('.blockUI', { state: 'hidden', timeout: 5000 }).catch(() => {});
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(1000);
   } catch (err) {
     console.warn(`[SPINNER WARN] Overlay wait timed out or failed: ${err.message}`);
   }
 }
 
-/**
- * Reliable click that waits for overlays before and after action
- */
 async function safeClick(page, selector, stepLabel, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       await waitDimmed(page);
       const el = page.locator(selector).first();
-      await el.waitFor({ state: 'visible', timeout: 30000 });
+      await el.waitFor({ state: 'attached', timeout: 30000 });
       await el.scrollIntoViewIfNeeded();
-      await el.click();
+      await el.waitFor({ state: 'visible', timeout: 15000 });
+      await el.click({ timeout: 15000 });
       console.log(`[ACTION] Clicked: ${stepLabel}`);
       await snap(page, `after_${stepLabel}`);
       await waitDimmed(page);
@@ -67,13 +59,9 @@ async function safeClick(page, selector, stepLabel, maxRetries = 3) {
   }
 }
 
-/**
- * Compiles contract, permit image, billing receipt, and Class D Log into one unified PDF
- */
 async function assembleStudentPdf(studentName, { contractPath, permitPath, billingPath, classDPath }) {
   const finalDoc = await PDFDocument.create();
 
-  // 1. Contract PDF
   if (contractPath && fs.existsSync(contractPath)) {
     try {
       const contractDoc = await PDFDocument.load(fs.readFileSync(contractPath));
@@ -85,7 +73,6 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     }
   }
 
-  // 2. Permit Photo (scaled cleanly to fit on a single letter page)
   if (permitPath && fs.existsSync(permitPath)) {
     try {
       const imgBuffer = fs.readFileSync(permitPath);
@@ -117,7 +104,6 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     }
   }
 
-  // 3. Billing Receipt PDF
   if (billingPath && fs.existsSync(billingPath)) {
     try {
       const billingDoc = await PDFDocument.load(fs.readFileSync(billingPath));
@@ -129,7 +115,6 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     }
   }
 
-  // 4. Class D Log PDF
   if (classDPath && fs.existsSync(classDPath)) {
     try {
       const classDDoc = await PDFDocument.load(fs.readFileSync(classDPath));
@@ -174,7 +159,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     await snap(page, 'login_credentials_filled');
 
     await page.click('button.btn.green-haze:has-text("Login")');
-    console.log('[STEP 1] Submitted login form. Waiting for portal load...');
+    console.log('[STEP 1] Submitted login. Waiting for redirect and hydration...');
     await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
     await waitDimmed(page);
     await snap(page, 'post_login_homepage');
@@ -182,32 +167,44 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     // 2. Select Location
     console.log('[STEP 2] Switching location to SCLTDACharleston250514...');
     await safeClick(page, 'a.dropdown-toggle:has-text("Switch to")', 'open_switch_to_dropdown');
-    await safeClick(page, 'a[onclick*="RedirectToNewURL"][data-id="8217"]', 'select_charleston_location');
+    
+    // Switching location triggers a redirect to SwitchBuild URL
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {}),
+      safeClick(page, 'a[onclick*="RedirectToNewURL"][data-id="8217"]', 'select_charleston_location'),
+    ]);
+    
     await waitDimmed(page);
     await snap(page, 'location_switched');
 
     // 3. Open Report Center -> Business Reports
     console.log('[STEP 3] Opening Report Center...');
-    await safeClick(page, '#ReportCenterSideMenu > a', 'click_report_center_menu');
-    await safeClick(page, 'a.ReportCenter_BusinessReports', 'click_business_reports');
+    // Ensure sidebar is expanded / visible
+    const reportCenterMenu = page.locator('#ReportCenterSideMenu > a, li#ReportCenterSideMenu, a:has-text("Report Center")').first();
+    await reportCenterMenu.waitFor({ state: 'attached', timeout: 30000 });
+    await reportCenterMenu.scrollIntoViewIfNeeded();
+    await safeClick(page, '#ReportCenterSideMenu > a, a:has-text("Report Center")', 'click_report_center_menu');
+
+    // Business Reports link
+    await safeClick(page, 'a.ReportCenter_BusinessReports, a:has-text("Business Reports")', 'click_business_reports');
     await waitDimmed(page);
 
     // 4. Select BTW Hours Completed & Configure Date Pickers
     console.log('[STEP 4] Loading All BTW Hours Completed...');
-    await safeClick(page, 'a.reportstudenteventlog[data-reportid="4"]', 'click_btw_hours_report');
+    await safeClick(page, 'a.reportstudenteventlog[data-reportid="4"], a:has-text("All BTW Hours Completed")', 'click_btw_hours_report');
     await waitDimmed(page);
 
     // Pick Start Date (21 Sep)
     console.log('[STEP 4] Setting start date (21 Sep)...');
     await safeClick(page, '#startDatePicker_reportBTWHoursCompleted', 'open_start_datepicker');
-    const startCell = page.locator('.datepicker-dropdown:visible td.day:not(.old):not(.new):has-text("21")').first();
+    const startCell = page.locator('.datepicker-dropdown:visible td.day:not(.old):not(.new):text-is("21")').first();
     await startCell.click();
     await waitDimmed(page);
 
     // Pick End Date (28 Sep)
     console.log('[STEP 4] Setting end date (28 Sep)...');
     await safeClick(page, '#endDatePicker_reportBTWHoursCompleted', 'open_end_datepicker');
-    const endCell = page.locator('.datepicker-dropdown:visible td.day:not(.old):not(.new):has-text("28")').first();
+    const endCell = page.locator('.datepicker-dropdown:visible td.day:not(.old):not(.new):text-is("28")').first();
     await endCell.click();
     await waitDimmed(page);
 
@@ -253,7 +250,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       };
 
       // 6a. Return to Home Page
-      await safeClick(page, 'a[href*="/CentralizeAdmin/NewHomePage/NewHomePage"]', 'nav_home');
+      await safeClick(page, 'a[href*="/CentralizeAdmin/NewHomePage/NewHomePage"], a:has-text("Home")', 'nav_home');
       await waitDimmed(page);
 
       // 6b. Search Student
@@ -275,12 +272,12 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await autocompleteItem.click();
       await snap(page, 'selected_autocomplete_item');
 
-      await safeClick(page, 'a.btn.green[onclick*="RedirectToStudentAccountPage"]', 'click_student_go');
+      await safeClick(page, 'a.btn.green[onclick*="RedirectToStudentAccountPage"], a:text-is("Go")', 'click_student_go');
       await waitDimmed(page);
       await snap(page, 'student_account_loaded');
 
       // 6c. Files Tab
-      await safeClick(page, 'strong.text-uppercase:has-text("Files")', 'click_files_tab');
+      await safeClick(page, 'strong.text-uppercase:has-text("Files"), a[href*="Files"]', 'click_files_tab');
       await waitDimmed(page);
 
       // Oldest Contract
@@ -318,7 +315,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
 
       // 6d. Enrollment / Billing Receipt
       console.log('[STUDENT] Navigating to Enrollment/Billing tab...');
-      await safeClick(page, 'a.tabBillingEnrollment', 'click_billing_tab');
+      await safeClick(page, 'a.tabBillingEnrollment, a:has-text("Enrollment/Billing")', 'click_billing_tab');
       await waitDimmed(page);
 
       await safeClick(page, 'a.btn.blue.btn-sm:has-text("Edit")', 'click_billing_edit');
@@ -338,11 +335,11 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
 
       // 6e. Report Center -> Class D Log
       console.log('[STUDENT] Fetching Class D Log...');
-      await safeClick(page, '#ReportCenterSideMenu > a', 'open_report_center');
-      await safeClick(page, '#rc_SCStateFormsReports a', 'click_sc_reports');
+      await safeClick(page, '#ReportCenterSideMenu > a, a:has-text("Report Center")', 'open_report_center');
+      await safeClick(page, '#rc_SCStateFormsReports a, a:has-text("SC Reports/Forms")', 'click_sc_reports');
       await waitDimmed(page);
 
-      await safeClick(page, 'a.ClsType[data-target="#modal_WAStateForms_TempAuthForm"]', 'click_class_d_log');
+      await safeClick(page, 'a.ClsType[data-target="#modal_WAStateForms_TempAuthForm"], a:has-text("Class D LOG")', 'click_class_d_log');
       await waitDimmed(page);
 
       const searchBox = page.locator('#txt_SCStateForms_TempAuthForm_SearchStudentByLastName');
