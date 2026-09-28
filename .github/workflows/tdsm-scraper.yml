@@ -2,6 +2,15 @@ name: TDSM Portal Scraper
 
 on:
   workflow_dispatch:
+    inputs:
+      start_date:
+        description: 'Report start date (YYYY-MM-DD). Leave empty for the last 7 days.'
+        required: false
+        default: ''
+      end_date:
+        description: 'Report end date (YYYY-MM-DD). Leave empty for the last 7 days.'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -38,6 +47,8 @@ jobs:
           PORTAL_USER: ${{ secrets.PORTAL_USER }}
           PORTAL_PASS: ${{ secrets.PORTAL_PASS }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          START_DATE: ${{ inputs.start_date }}
+          END_DATE: ${{ inputs.end_date }}
         run: node tdsm_extractor.js
 
       - name: Upload Step Screenshots (Debug Artifact)
