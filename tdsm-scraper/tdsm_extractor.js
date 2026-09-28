@@ -13,6 +13,20 @@ const DOWNLOADS_DIR = path.resolve('downloads');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
+// ---------------------------------------------------------------------------
+// Timing knobs. If the portal ever acts up (clicks landing too early, lists not
+// refreshed), raise these first.
+// ---------------------------------------------------------------------------
+const SETTLE_MS = 250;        // pause after every spinner/overlay wait (was 1000)
+const SLEEP_SHORT_MS = 150;   // tiny UI settle (was 300-1000)
+const SLEEP_MEDIUM_MS = 400;  // settle after a server-filtered list refresh (was 1000)
+const TYPE_DELAY_MS = 25;     // per-keystroke delay in the student search box (was 60)
+const RETRY_PAUSE_MS = 2000;  // pause between click retries (unchanged)
+
+// Screenshots are only taken when something fails. To capture every step again
+// (for debugging), run with SCREENSHOTS=all.
+const SCREENSHOTS_ALL = process.env.SCREENSHOTS === 'all';
+
 
 // ---------------------------------------------------------------------------
 // Live progress reporting
@@ -77,7 +91,8 @@ async function finishProgress() {
 
 let stepCounter = 1;
 
-async function snap(page, stepName) {
+async function snap(page, stepName, { force = false } = {}) {
+  if (!force && !SCREENSHOTS_ALL) return;
   const safeName = `${String(stepCounter++).padStart(3, '0')}_${stepName.replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
   const filePath = path.join(SCREENSHOT_DIR, safeName);
   try {
@@ -88,12 +103,17 @@ async function snap(page, stepName) {
   }
 }
 
+// Always captures, used only on failures.
+function snapFailure(page, stepName) {
+  return snap(page, `FAIL_${stepName}`, { force: true });
+}
+
 async function waitDimmed(page, timeoutMs = 70000) {
   console.log('[SPINNER] Waiting for loading backdrop/fade to vanish...');
   try {
     await page.waitForSelector('.fade', { state: 'hidden', timeout: timeoutMs }).catch(() => {});
     await page.waitForSelector('.blockUI', { state: 'hidden', timeout: 5000 }).catch(() => {});
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(SETTLE_MS);
   } catch (err) {
     console.warn(`[SPINNER WARN] Overlay wait timed out or failed: ${err.message}`);
   }
@@ -114,8 +134,9 @@ async function safeClick(page, selector, stepLabel, maxRetries = 3) {
       return;
     } catch (err) {
       console.warn(`[RETRY ${attempt}/${maxRetries}] Failed to click "${stepLabel}": ${err.message}`);
+      await snapFailure(page, `${stepLabel}_attempt${attempt}`);
       if (attempt === maxRetries) throw err;
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(RETRY_PAUSE_MS);
     }
   }
 }
@@ -135,42 +156,53 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     }
   }
 
-  // 2. Permit Photo (rotated clockwise to be upright, centered cleanly on a single letter page)
+  // 2. Permit (detected by file contents, not extension: PDF, PNG or JPG)
   if (permitPath && fs.existsSync(permitPath)) {
     try {
-      const imgBuffer = fs.readFileSync(permitPath);
-      let img;
-      if (permitPath.toLowerCase().endsWith('.png')) {
-        img = await finalDoc.embedPng(imgBuffer);
+      const permitBuffer = fs.readFileSync(permitPath);
+      const isPdf = permitBuffer.subarray(0, 5).toString('latin1') === '%PDF-';
+      const isPng = permitBuffer.length > 4 && permitBuffer[0] === 0x89 && permitBuffer[1] === 0x50 &&
+        permitBuffer[2] === 0x4e && permitBuffer[3] === 0x47;
+      const isJpg = permitBuffer.length > 2 && permitBuffer[0] === 0xff && permitBuffer[1] === 0xd8;
+
+      if (isPdf) {
+        // PDF permit: copy its pages in as they are
+        const permitDoc = await PDFDocument.load(permitBuffer);
+        const pages = await finalDoc.copyPages(permitDoc, permitDoc.getPageIndices());
+        pages.forEach((p) => finalDoc.addPage(p));
+        console.log(`[MERGE] Merged PDF permit (${pages.length} page(s)) for ${studentName}`);
+      } else if (isPng || isJpg) {
+        // Image permit: rotated clockwise to be upright, centered on a single letter page
+        const img = isPng ? await finalDoc.embedPng(permitBuffer) : await finalDoc.embedJpg(permitBuffer);
+
+        const page = finalDoc.addPage([612, 792]); // Standard US Letter
+        const margin = 40;
+        const maxWidth = 612 - margin * 2;
+        const maxHeight = 792 - margin * 2;
+
+        // Because the image is oriented sideways, its dimensions swap
+        const scale = Math.min(maxWidth / img.height, maxHeight / img.width, 1);
+        const renderW = img.width * scale;
+        const renderH = img.height * scale;
+
+        const centerX = 612 / 2;
+        const centerY = 792 / 2;
+
+        // Rotate 90° clockwise (degrees(-90)) with proper origin shift
+        page.drawImage(img, {
+          x: centerX - renderH / 2,
+          y: centerY - renderW / 2 + renderW,
+          width: renderW,
+          height: renderH,
+          rotate: degrees(-90),
+        });
+
+        console.log(`[MERGE] Embedded upright permit image for ${studentName}`);
       } else {
-        img = await finalDoc.embedJpg(imgBuffer);
+        console.error(`[MERGE ERROR] Permit for ${studentName} is not a PDF, PNG or JPG (${permitPath})`);
       }
-
-      const page = finalDoc.addPage([612, 792]); // Standard US Letter
-      const margin = 40;
-      const maxWidth = 612 - margin * 2;
-      const maxHeight = 792 - margin * 2;
-
-      // Because the image is oriented sideways, its dimensions swap
-      const scale = Math.min(maxWidth / img.height, maxHeight / img.width, 1);
-      const renderW = img.width * scale;
-      const renderH = img.height * scale;
-
-      const centerX = 612 / 2;
-      const centerY = 792 / 2;
-
-      // Rotate 90° clockwise (degrees(-90)) with proper origin shift
-      page.drawImage(img, {
-        x: centerX - renderH / 2,
-        y: centerY - renderW / 2 + renderW,
-        width: renderW,
-        height: renderH,
-        rotate: degrees(-90),
-      });
-
-      console.log(`[MERGE] Embedded upright permit image for ${studentName}`);
     } catch (err) {
-      console.error(`[MERGE ERROR] Failed embedding permit image: ${err.message}`);
+      console.error(`[MERGE ERROR] Failed embedding permit: ${err.message}`);
     }
   }
 
@@ -206,6 +238,11 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
 }
 
 (async () => {
+  if (!process.env.PORTAL_USER || !process.env.PORTAL_PASS) {
+    console.error('[FATAL ERROR]: PORTAL_USER and PORTAL_PASS must be set (add them as GitHub secrets and pass them in the workflow env).');
+    process.exit(1);
+  }
+
   const browser = await chromium.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -226,8 +263,8 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     });
     await snap(page, 'login_page_loaded');
 
-    await page.fill('#username', process.env.PORTAL_USER || 'Guest1');
-    await page.fill('#password', process.env.PORTAL_PASS || 'Learntodrive2');
+    await page.fill('#username', process.env.PORTAL_USER);
+    await page.fill('#password', process.env.PORTAL_PASS);
     await snap(page, 'login_credentials_filled');
 
     await page.click('button.btn.green-haze:has-text("Login")');
@@ -339,9 +376,9 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       const studentInput = page.locator('#studentList');
       await studentInput.click();
       await studentInput.fill('');
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(SLEEP_SHORT_MS);
 
-      await studentInput.pressSequentially(`${student.lastName} ${student.firstName}`, { delay: 60 });
+      await studentInput.pressSequentially(`${student.lastName} ${student.firstName}`, { delay: TYPE_DELAY_MS });
       await snap(page, `typed_student_${student.lastName}`);
 
       const autocompleteItem = page.locator('.k-animation-container ul li.k-item, #studentList_listbox li.k-item, li.k-item').first();
@@ -405,7 +442,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       const billingHeaderPrintBtn = page.locator('#divBillingGrid a.btn.blue.btn-sm[onclick*="GetbillingAndEnrollmentForPrintGulAndEmail"], #divBillingGrid a:has-text("PRINT")').first();
       await billingHeaderPrintBtn.waitFor({ state: 'visible', timeout: 20000 });
       await billingHeaderPrintBtn.click();
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(SLEEP_SHORT_MS);
       await snap(page, `print_modal_opened_${student.lastName}`);
 
       const modal = page.locator('#Print_Enroll_billing_info');
@@ -421,7 +458,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       } else {
         await modal.locator('label').filter({ hasText: '$' }).last().click();
       }
-      await page.waitForTimeout(400);
+      await page.waitForTimeout(SLEEP_SHORT_MS);
       await snap(page, `modal_selected_oldest_${student.lastName}`);
 
       const modalPrintBtn = modal.locator('a.btn.green[onclick*="GetReceiptofEnrollmentAndBilling"], a.btn.green:has-text("PRINT")').first();
@@ -457,7 +494,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await classDCard.waitFor({ state: 'visible', timeout: 20000 });
       await classDCard.click();
       await waitDimmed(page);
-      await page.waitForTimeout(800);
+      await page.waitForTimeout(SLEEP_SHORT_MS);
 
       await snap(page, `opened_class_d_modal_${student.lastName}`);
 
@@ -468,7 +505,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       const filterBtn = page.locator('#btn_WAStateForms_TempAuthForm_FetchStudentByLastName');
       await filterBtn.click();
       await waitDimmed(page);
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(SLEEP_MEDIUM_MS);
 
       const studentsSelect = page.locator('#select_SCStateForms_StudentsList_TempAuthForm');
       await studentsSelect.waitFor({ state: 'visible', timeout: 15000 });
@@ -498,7 +535,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
         console.warn(`[STUDENT WARN] Could not find option for ${student.lastName}, ${student.firstName}`);
       }
 
-      await page.waitForTimeout(400);
+      await page.waitForTimeout(SLEEP_SHORT_MS);
       await snap(page, `selected_class_d_${student.lastName}`);
 
       const [classDDownload] = await Promise.all([
@@ -526,7 +563,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     console.log('\n[COMPLETE] All student packets have been scraped and merged.');
   } catch (error) {
     console.error(`[FATAL ERROR]: ${error.stack}`);
-    await snap(page, 'fatal_crash_state');
+    await snapFailure(page, 'fatal_crash_state');
     process.exitCode = 1;
   } finally {
     await finishProgress();
