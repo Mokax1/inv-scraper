@@ -165,28 +165,41 @@ function shiftDate(d, days) {
   return { year: t.getUTCFullYear(), month: t.getUTCMonth() + 1, day: t.getUTCDate() };
 }
 
+// "Today" as the portal sees it (US Eastern). The PC running the desktop app can be a
+// day ahead (e.g. Cairo), and the portal's datepicker does not allow future dates.
+function portalToday() {
+  const todayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+  const now = new Date();
+  return parseIsoDate(todayIso) ||
+    { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1, day: now.getUTCDate() };
+}
+
 function resolveDateRange(env = process.env) {
   const startRaw = (env.START_DATE || '').trim();
   const endRaw = (env.END_DATE || '').trim();
+  const today = portalToday();
 
   if (startRaw || endRaw) {
-    const start = parseIsoDate(startRaw);
-    const end = parseIsoDate(endRaw);
+    let start = parseIsoDate(startRaw);
+    let end = parseIsoDate(endRaw);
     if (!start || !end) {
       throw new Error(`START_DATE and END_DATE must both be valid YYYY-MM-DD dates (got "${startRaw}" and "${endRaw}")`);
     }
     if (dateKey(end) < dateKey(start)) {
       throw new Error(`END_DATE (${endRaw}) is before START_DATE (${startRaw})`);
     }
-    return { start, end, source: 'app' };
+    let source = 'app';
+    if (dateKey(end) > dateKey(today)) {
+      console.warn(`[DATE WARN] END_DATE ${formatDate(end)} is after the portal's today (${formatDate(today)}); using ${formatDate(today)}`);
+      end = today;
+      source = 'app, end date limited to portal today';
+    }
+    if (dateKey(start) > dateKey(end)) start = end;
+    return { start, end, source };
   }
 
   // Fallback: last 7 days ending today, using US Eastern time
-  const todayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
-  const now = new Date();
-  const end = parseIsoDate(todayIso) ||
-    { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1, day: now.getUTCDate() };
-  return { start: shiftDate(end, -6), end, source: 'default (last 7 days)' };
+  return { start: shiftDate(today, -6), end: today, source: 'default (last 7 days)' };
 }
 
 // Opens a bootstrap-datepicker, pages to the right month/year, then clicks the day.
@@ -207,7 +220,10 @@ async function pickDate(page, pickerSelector, label, target) {
 
     const shown = year * 12 + monthIdx;
     if (shown === wanted) {
-      const cell = dropdown.locator(`td.day:not(.old):not(.new):text-is("${target.day}")`).first();
+      const cell = dropdown.locator(`td.day:not(.old):not(.new):not(.disabled):text-is("${target.day}")`).first();
+      if ((await cell.count()) === 0) {
+        throw new Error(`The ${label} date ${formatDate(target)} is not selectable in the portal datepicker (disabled or missing day)`);
+      }
       await cell.click();
       console.log(`[ACTION] Picked ${label} date: ${formatDate(target)}`);
       await waitDimmed(page);
