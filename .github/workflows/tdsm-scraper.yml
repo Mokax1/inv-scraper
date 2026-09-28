@@ -3,6 +3,10 @@ name: TDSM Portal Scraper
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  checks: write   # lets the scraper post live progress for the desktop app
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
@@ -33,6 +37,7 @@ jobs:
         env:
           PORTAL_USER: ${{ secrets.PORTAL_USER }}
           PORTAL_PASS: ${{ secrets.PORTAL_PASS }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node tdsm_extractor.js
 
       - name: Upload Step Screenshots (Debug Artifact)
