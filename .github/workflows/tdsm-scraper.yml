@@ -1,0 +1,48 @@
+name: TDSM Portal Scraper
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies from custom package file
+        run: |
+          cd tdsm-scraper
+          npm install --package-lock-only=false --prefix . $(node -e "const pkg=require('./tdsm_package.json'); console.log(Object.entries(pkg.dependencies).map(([k,v])=>k+'@'+v).join(' '))")
+
+      - name: Install Playwright browsers & OS dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Scraper
+        env:
+          PORTAL_USER: ${{ secrets.PORTAL_USER }}
+          PORTAL_PASS: ${{ secrets.PORTAL_PASS }}
+        run: node tdsm-scraper/tdsm_extractor.js
+
+      - name: Upload Step Screenshots (Debug Artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portal-flow-screenshots
+          path: tdsm-scraper/screenshots/
+          retention-days: 7
+
+      - name: Upload Compiled Student PDFs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: student-packets
+          path: tdsm-scraper/output/
+          retention-days: 30
