@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import ExcelJS from 'exceljs';
+import * as XLSX from 'xlsx';
 import { PDFDocument } from 'pdf-lib';
 import fs from 'fs';
 import path from 'path';
@@ -167,7 +167,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     await waitDimmed(page);
     await snap(page, 'post_login_homepage');
 
-    // 2. Open Report Center -> Business Reports directly
+    // 2. Open Report Center -> Business Reports
     console.log('[STEP 2] Opening Report Center...');
     const reportCenterMenu = page.locator('#ReportCenterSideMenu > a, li#ReportCenterSideMenu, a:has-text("Report Center")').first();
     await reportCenterMenu.waitFor({ state: 'attached', timeout: 30000 });
@@ -205,22 +205,30 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
 
     const excelFilePath = path.join(DOWNLOADS_DIR, 'BTWHoursCompleted.xlsx');
     await downloadEvent.saveAs(excelFilePath);
-    console.log(`[STEP 4] Downloaded Excel to: ${excelFilePath}`);
+    console.log(`[STEP 4] Downloaded file to: ${excelFilePath}`);
 
-    // Parse Excel File
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(excelFilePath);
-    const worksheet = workbook.worksheets[0];
+    // Parse Excel with SheetJS (bypasses XML BOM issues)
+    const fileBuffer = fs.readFileSync(excelFilePath);
+    const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
     const students = [];
-
-    worksheet.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) return;
-      const firstName = row.getCell(1).text?.trim();
-      const lastName = row.getCell(2).text?.trim();
+    // Row 0 is header: ['First Name', 'Last Name', ...]
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.length === 0) continue;
+      const firstName = String(row[0] || '').trim();
+      const lastName = String(row[1] || '').trim();
       if (firstName && lastName) {
-        students.push({ firstName, lastName, fullName: `${firstName} ${lastName}` });
+        students.push({
+          firstName,
+          lastName,
+          fullName: `${firstName} ${lastName}`,
+        });
       }
-    });
+    }
 
     console.log(`[INFO] Found ${students.length} student(s) to process.`);
 
