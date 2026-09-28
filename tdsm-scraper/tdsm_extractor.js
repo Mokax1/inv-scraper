@@ -391,31 +391,70 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       }
       await waitDimmed(page);
 
-      // 5e. Report Center -> Class D Log
-      console.log('[STUDENT] Fetching Class D Log...');
+   // 5e. Report Center -> Class D Log
+      console.log(`[STUDENT] Fetching Class D Log for ${student.fullName}...`);
       await safeClick(page, '#ReportCenterSideMenu > a, a:has-text("Report Center")', 'open_report_center');
       await safeClick(page, '#rc_SCStateFormsReports a, a:has-text("SC Reports/Forms")', 'click_sc_reports');
       await waitDimmed(page);
 
-      await safeClick(page, 'a.ClsType[data-target="#modal_WAStateForms_TempAuthForm"], a:has-text("Class D LOG")', 'click_class_d_log');
+      // Target Class D LOG specifically using data-type="2"
+      const classDCard = page.locator('a.ClsType[data-type="2"]').first();
+      await classDCard.waitFor({ state: 'visible', timeout: 20000 });
+      await classDCard.click();
       await waitDimmed(page);
+      await page.waitForTimeout(800);
 
+      // Verify the Class D Log modal opened
+      await snap(page, `opened_class_d_modal_${student.lastName}`);
+
+      // Enter student last name
       const searchBox = page.locator('#txt_SCStateForms_TempAuthForm_SearchStudentByLastName');
       await searchBox.waitFor({ state: 'visible', timeout: 15000 });
       await searchBox.fill(student.lastName);
-      await safeClick(page, '#btn_WAStateForms_TempAuthForm_FetchStudentByLastName', 'filter_student_last_name');
-      await waitDimmed(page);
 
-      const studentOption = page.locator('#select_SCStateForms_StudentsList_TempAuthForm option', {
-        hasText: student.lastName,
+      // Click Filter
+      const filterBtn = page.locator('#btn_WAStateForms_TempAuthForm_FetchStudentByLastName');
+      await filterBtn.click();
+      await waitDimmed(page);
+      await page.waitForTimeout(1000);
+
+      // Select student from #select_SCStateForms_StudentsList_TempAuthForm
+      const studentsSelect = page.locator('#select_SCStateForms_StudentsList_TempAuthForm');
+      await studentsSelect.waitFor({ state: 'visible', timeout: 15000 });
+
+      // Match "LastName, FirstName"
+      const targetOption = studentsSelect.locator('option').filter({
+        hasText: new RegExp(`^\\s*${student.lastName},\\s*${student.firstName}`, 'i')
       }).first();
-      await studentOption.waitFor({ state: 'visible', timeout: 15000 });
-      const optionValue = await studentOption.getAttribute('value');
-      await page.selectOption('#select_SCStateForms_StudentsList_TempAuthForm', optionValue);
+
+      let targetVal = null;
+      if (await targetOption.count() > 0) {
+        targetVal = await targetOption.getAttribute('value');
+      } else {
+        // Fallback: match any option containing both last and first name
+        const allOptions = await studentsSelect.locator('option').all();
+        for (const opt of allOptions) {
+          const txt = (await opt.textContent()).toLowerCase();
+          if (txt.includes(student.lastName.toLowerCase()) && txt.includes(student.firstName.toLowerCase())) {
+            targetVal = await opt.getAttribute('value');
+            break;
+          }
+        }
+      }
+
+      if (targetVal) {
+        console.log(`[STUDENT] Selected option ID: ${targetVal} for ${student.fullName}`);
+        await studentsSelect.selectOption(targetVal);
+      } else {
+        console.warn(`[STUDENT WARN] Could not find option for ${student.lastName}, ${student.firstName}`);
+      }
+
+      await page.waitForTimeout(400);
       await snap(page, `selected_class_d_${student.lastName}`);
 
+      // Click Create PDF
       const [classDDownload] = await Promise.all([
-        page.waitForEvent('download', { timeout: 30000 }),
+        page.waitForEvent('download', { timeout: 35000 }),
         safeClick(page, '#btn_SCStateForms_Download_TempAuthFrom', 'click_create_pdf_class_d'),
       ]);
 
@@ -423,7 +462,13 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await classDDownload.saveAs(studentDocs.classDPath);
       console.log(`[STUDENT] Saved Class D Log: ${studentDocs.classDPath}`);
 
-      await page.keyboard.press('Escape').catch(() => {});
+      // Close modal
+      const modalClose = page.locator('#modal_WAStateForms_TempAuthForm button[data-dismiss="modal"]:has-text("CLOSE"), #modal_WAStateForms_TempAuthForm button.close').first();
+      if (await modalClose.isVisible().catch(() => false)) {
+        await modalClose.click();
+      } else {
+        await page.keyboard.press('Escape').catch(() => {});
+      }
       await waitDimmed(page);
 
       // 5f. Merge PDFs
