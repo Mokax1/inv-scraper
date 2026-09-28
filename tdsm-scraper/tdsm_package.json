@@ -1,0 +1,10 @@
+{
+  "name": "tdsm-playwright-extractor",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "pdf-lib": "^1.17.1",
+    "playwright": "^1.48.0"
+  }
+}
