@@ -327,21 +327,34 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
         console.log(`[STUDENT] Saved permit: ${studentDocs.permitPath}`);
       }
 
-      // 5d. Enrollment / Billing Receipt
+     // 5d. Enrollment / Billing Receipt
       console.log('[STUDENT] Navigating to Enrollment/Billing tab...');
-      await safeClick(page, 'a.tabBillingEnrollment, a:has-text("Enrollment/Billing")', 'click_billing_tab');
+      // Click the exact in-page tab pill inside .nav-tabs (NOT the sidebar link)
+      const billingTab = page.locator('ul.nav-tabs a.tabBillingEnrollment[href="#tb_billing"], a[onclick*="_FetchEnrollmentBillingView"]');
+      await billingTab.waitFor({ state: 'visible', timeout: 15000 });
+      await billingTab.click();
       await waitDimmed(page);
+      await snap(page, `billing_tab_loaded_${student.lastName}`);
 
-      await safeClick(page, 'a.btn.blue.btn-sm:has-text("Edit")', 'click_billing_edit');
+      // Wait for the billing tab pane and the Edit dropdown button to appear
+      const editDropdown = page.locator('#tb_billing a.btn.blue.btn-sm[data-toggle="dropdown"], a.btn.blue.btn-sm:has-text("Edit")').first();
+      await editDropdown.waitFor({ state: 'visible', timeout: 25000 });
+      await editDropdown.click();
+      await snap(page, `edit_dropdown_opened_${student.lastName}`);
+
+      // Click the Print option from the dropdown menu and capture the newly opened tab/window
+      const printLink = page.locator('a[onclick*="GetReceiptofEnrollmentAndBillingFromGridRow"], a:has-text("Print")').first();
+      await printLink.waitFor({ state: 'visible', timeout: 15000 });
 
       const [printPage] = await Promise.all([
         context.waitForEvent('page', { timeout: 30000 }),
-        safeClick(page, 'a[onclick*="GetReceiptofEnrollmentAndBillingFromGridRow"]', 'click_billing_print'),
+        printLink.click(),
       ]);
 
       await printPage.waitForLoadState('networkidle');
       await snap(printPage, `billing_receipt_page_${student.lastName}`);
 
+      // Save PDF of the receipt
       studentDocs.billingPath = path.join(DOWNLOADS_DIR, `${student.lastName}_billing_receipt.pdf`);
       await printPage.pdf({ path: studentDocs.billingPath, format: 'Letter', printBackground: true });
       console.log(`[STUDENT] Generated billing PDF: ${studentDocs.billingPath}`);
