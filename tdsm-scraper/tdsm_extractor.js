@@ -327,7 +327,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
         console.log(`[STUDENT] Saved permit: ${studentDocs.permitPath}`);
       }
 
-   // 5d. Enrollment / Billing Receipt
+   // 5d. Enrollment / Billing Receipt via Modal Print
       console.log('[STUDENT] Navigating to Enrollment/Billing tab...');
       const billingTab = page.locator('ul.nav-tabs a.tabBillingEnrollment[href="#tb_billing"], a[onclick*="_FetchEnrollmentBillingView"]');
       await billingTab.waitFor({ state: 'visible', timeout: 15000 });
@@ -335,36 +335,79 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await waitDimmed(page);
       await snap(page, `billing_tab_loaded_${student.lastName}`);
 
-      // Wait specifically for #billingtableid to populate
-      const billingTable = page.locator('#billingtableid');
-      await billingTable.waitFor({ state: 'visible', timeout: 25000 });
+      // Click the header "PRINT" button in the BILLING header
+      console.log('[STUDENT] Opening Print Enrollments/Billing modal...');
+      const billingHeaderPrintBtn = page.locator('#divBillingGrid a.btn.blue.btn-sm[onclick*="GetbillingAndEnrollmentForPrintGulAndEmail"], #divBillingGrid a:has-text("PRINT")').first();
+      await billingHeaderPrintBtn.waitFor({ state: 'visible', timeout: 20000 });
+      await billingHeaderPrintBtn.click();
+      await page.waitForTimeout(1000); // Allow modal animation to finish
+      await snap(page, `print_modal_opened_${student.lastName}`);
 
-      // Click the EDIT dropdown button on the first row of #billingtableid (the oldest receipt)
-      console.log('[STUDENT] Opening EDIT dropdown on row 1 of #billingtableid...');
-      const firstRowEditBtn = billingTable.locator('tbody tr').first().locator('a[data-toggle="dropdown"], a.btn.blue');
-      await firstRowEditBtn.waitFor({ state: 'visible', timeout: 15000 });
-      await firstRowEditBtn.click();
-      await page.waitForTimeout(600); // Allow the detached menu to appear under <body>
-      await snap(page, `billing_edit_dropdown_opened_${student.lastName}`);
+      // Scope to the modal dialog
+      const modal = page.locator('#Print_Enroll_billing_info');
+      await modal.waitFor({ state: 'visible', timeout: 15000 });
 
-      // The menu is appended to <body>: find the visible link matching 'billing' and 'Print'
-      const printLink = page.locator('ul.dropdown-menu[style*="display: block"] a[onclick*="billing"], a:visible[onclick*="billing"]:has-text("Print")').first();
-      await printLink.waitFor({ state: 'visible', timeout: 15000 });
+      // Ensure Enrollment column options are unchecked so only Billing is printed
+      const checkedEnrollment = modal.locator('.icheckbox_square-grey.checked').filter({
+        has: page.locator('input:not(.icheckBilling)')
+      });
+      const checkedEnrollmentCount = await checkedEnrollment.count();
+      for (let i = 0; i < checkedEnrollmentCount; i++) {
+        await checkedEnrollment.nth(i).click().catch(() => {});
+      }
 
-      // Intercept the new tab/window when clicking Print
+      // Handle Billing checkboxes: uncheck all except the oldest (last in list)
+      const billingCheckboxes = modal.locator('input.icheckBilling');
+      const billingCount = await billingCheckboxes.count();
+      console.log(`[STUDENT] Found ${billingCount} billing receipt checkbox(es) in modal.`);
+
+      if (billingCount > 0) {
+        // Uncheck all except the last
+        for (let i = 0; i < billingCount - 1; i++) {
+          const wrapper = modal.locator('.icheckbox_square-grey').filter({ has: billingCheckboxes.nth(i) });
+          const isChecked = await wrapper.evaluate(el => el.classList.contains('checked')).catch(() => false);
+          if (isChecked) {
+            await wrapper.click();
+            await page.waitForTimeout(200);
+          }
+        }
+
+        // Check the oldest (the last row)
+        const oldestWrapper = modal.locator('.icheckbox_square-grey').filter({ has: billingCheckboxes.nth(billingCount - 1) });
+        const isOldestChecked = await oldestWrapper.evaluate(el => el.classList.contains('checked')).catch(() => false);
+        if (!isOldestChecked) {
+          await oldestWrapper.click();
+          await page.waitForTimeout(200);
+        }
+      }
+      await snap(page, `modal_selected_oldest_${student.lastName}`);
+
+      // Click PRINT in the modal footer and catch the new receipt tab
+      console.log('[STUDENT] Triggering receipt print in modal...');
+      const modalPrintBtn = modal.locator('a.btn.green[onclick*="GetReceiptofEnrollmentAndBilling"], a.btn.green:has-text("PRINT")').first();
+
       const [printPage] = await Promise.all([
         context.waitForEvent('page', { timeout: 30000 }),
-        printLink.click(),
+        modalPrintBtn.click(),
       ]);
 
       await printPage.waitForLoadState('networkidle');
-      await snap(printPage, `billing_receipt_page_${student.lastName}`);
+      await snap(printPage, `receipt_opened_${student.lastName}`);
 
-      // Save billing PDF directly from the print preview tab
+      // Generate the clean PDF from the print page
       studentDocs.billingPath = path.join(DOWNLOADS_DIR, `${student.lastName}_billing_receipt.pdf`);
       await printPage.pdf({ path: studentDocs.billingPath, format: 'Letter', printBackground: true });
       console.log(`[STUDENT] Generated billing PDF: ${studentDocs.billingPath}`);
       await printPage.close();
+
+      // Close the modal dialog if it remained open
+      const closeBtn = modal.locator('button[data-dismiss="modal"]:has-text("CLOSE"), button:has-text("CLOSE")').first();
+      if (await closeBtn.isVisible().catch(() => false)) {
+        await closeBtn.click();
+      } else {
+        await page.keyboard.press('Escape').catch(() => {});
+      }
+      await waitDimmed(page);
 
       // 5e. Report Center -> Class D Log
       console.log('[STUDENT] Fetching Class D Log...');
