@@ -15,6 +15,10 @@ on:
         description: 'Database / location to scrape (Charleston, Columbia, Greenville, Myrtle, RockHill). Leave empty to keep the portal default.'
         required: false
         default: ''
+      mark_completed:
+        description: 'Set each student to Completed after the packet is built (on / off).'
+        required: false
+        default: 'on'
 
 permissions:
   contents: read
@@ -55,6 +59,7 @@ jobs:
           START_DATE: ${{ inputs.start_date }}
           END_DATE: ${{ inputs.end_date }}
           DATABASE: ${{ inputs.database }}
+          MARK_COMPLETED: ${{ inputs.mark_completed }}
         run: node tdsm_extractor.js
 
       - name: Upload Step Screenshots (Debug Artifact)
