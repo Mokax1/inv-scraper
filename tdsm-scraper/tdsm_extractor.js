@@ -334,8 +334,8 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
 }
 
 (async () => {
-  if (!process.env.PORTAL_USER || !process.env.PORTAL_PASS) {
-    console.error('[FATAL ERROR]: PORTAL_USER and PORTAL_PASS must be set (add them as GitHub secrets and pass them in the workflow env).');
+  if (!process.env.PORTAL_URL || !process.env.PORTAL_USER || !process.env.PORTAL_PASS) {
+    console.error('[FATAL ERROR]: PORTAL_URL, PORTAL_USER and PORTAL_PASS must be set (add them as GitHub secrets and pass them in the workflow env).');
     process.exit(1);
   }
 
@@ -361,7 +361,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
 
   try {
     console.log('[STEP 1] Navigating to Login Page...');
-    await page.goto('https://tdsm.app/CentralizeAdmin/Login/Login?encId=PorpdwJMjHo_EQUAL_', {
+    await page.goto(process.env.PORTAL_URL, {
       waitUntil: 'networkidle',
       timeout: 60000,
     });
