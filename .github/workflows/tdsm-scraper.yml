@@ -11,6 +11,10 @@ on:
         description: 'Report end date (YYYY-MM-DD). Leave empty for the last 7 days.'
         required: false
         default: ''
+      database:
+        description: 'Database / location to scrape (Charleston, Columbia, Greenville, Myrtle, RockHill). Leave empty to keep the portal default.'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -50,6 +54,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           START_DATE: ${{ inputs.start_date }}
           END_DATE: ${{ inputs.end_date }}
+          DATABASE: ${{ inputs.database }}
         run: node tdsm_extractor.js
 
       - name: Upload Step Screenshots (Debug Artifact)
