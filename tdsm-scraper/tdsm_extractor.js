@@ -319,6 +319,110 @@ async function selectDatabase(page, dbKey, maxAttempts = 4) {
 // --- end database selection ------------------------------------------------
 
 
+// Home -> search the student -> Go. Lands on the student's Profile tab.
+async function openStudentProfile(page, student, label, stage) {
+  // 5a. Return to Home Page
+  await safeClick(page, 'a[href*="/CentralizeAdmin/NewHomePage/NewHomePage"], a:has-text("Home")', 'nav_home');
+  await waitDimmed(page);
+
+  // 5b. Search Student
+  await reportProgress(`${label} | ${stage}`);
+  const iCheckWrapper = page.locator('.icheckbox_square-grey');
+  if (await iCheckWrapper.count() > 0) {
+    const isChecked = await iCheckWrapper.first().evaluate(el => el.classList.contains('checked'));
+    if (isChecked) {
+      console.log('[STUDENT] Unchecking "ACTIVE STUDENTS ONLY"...');
+      await iCheckWrapper.first().click();
+      await waitDimmed(page);
+    }
+  } else {
+    await page.locator('label:has-text("ACTIVE STUDENTS ONLY"), span:has-text("ACTIVE STUDENTS ONLY")').first().click().catch(() => {});
+  }
+  await snap(page, 'after_uncheck_active_only');
+
+  const studentInput = page.locator('#studentList');
+  await studentInput.click();
+  await studentInput.fill('');
+  await page.waitForTimeout(SLEEP_SHORT_MS);
+
+  await studentInput.pressSequentially(student.lastName, { delay: TYPE_DELAY_MS });
+  await snap(page, `typed_student_${student.lastName}`);
+
+  const autocompleteItem = page
+    .locator('.k-animation-container ul li.k-item, #studentList_listbox li.k-item')
+    .filter({ hasText: student.firstName })
+    .first();
+  await autocompleteItem.waitFor({ state: 'visible', timeout: 10000 });
+  await autocompleteItem.click();
+  await snap(page, 'selected_autocomplete_item');
+  await waitDimmed(page);
+
+  await safeClick(page, 'a.btn.green[onclick*="RedirectToStudentAccountPage"], a:text-is("Go")', 'click_student_go');
+  await waitDimmed(page);
+  await snap(page, 'student_account_loaded');
+}
+
+// --- mark student as Completed ---------------------------------------------
+// Toggled from the desktop app (MARK_COMPLETED = on/off, default on).
+const MARK_COMPLETED = !['off', 'false', '0', 'no'].includes((process.env.MARK_COMPLETED || 'on').trim().toLowerCase());
+
+const PROFILE_STATUS = '.custom_thumnail h3.font-green';
+
+async function profileStatus(page) {
+  return ((await page.locator(PROFILE_STATUS).first().textContent({ timeout: 5000 }).catch(() => '')) || '').trim();
+}
+
+// On the student's Profile tab: Change Status -> Completed -> Save -> Yes, then reload the
+// page and confirm the status really reads COMPLETED (retries the whole sequence if not).
+async function markStudentCompleted(page, student, maxAttempts = 3) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await waitDimmed(page);
+    const profileTab = page.locator('a.tabProfile').first();
+    if (!(await page.locator(PROFILE_STATUS).first().isVisible().catch(() => false)) && (await profileTab.count()) > 0) {
+      await profileTab.click().catch(() => {});
+      await waitDimmed(page);
+    }
+
+    const before = await profileStatus(page);
+    if (/completed/i.test(before)) {
+      console.log(`[STATUS] ${student.fullName} is already COMPLETED.`);
+      return;
+    }
+    console.log(`[STATUS] Attempt ${attempt}/${maxAttempts}: ${student.fullName} is "${before}". Setting to Completed...`);
+
+    try {
+      await safeClick(page, '.custom_thumnail a.btn.blue.btn-sm[data-toggle="dropdown"]:has-text("Change Status")', `status_change_status_a${attempt}`, 2);
+      await safeClick(page, `.custom_thumnail ul.dropdown-menu a[onclick*="UpdateProfileStatus('3'"]`, `status_choose_completed_a${attempt}`, 2);
+      await safeClick(page, 'button.confirmReceipt[data-toggle="confirmationUpdateProfile"]', `status_save_a${attempt}`, 2);
+
+      const yesBtn = page.locator('.popover.confirmation a.btn-success[data-apply="confirmation"]').first();
+      await yesBtn.waitFor({ state: 'visible', timeout: 10000 });
+      await page.waitForTimeout(SLEEP_SHORT_MS);
+      await yesBtn.click({ timeout: 10000 });
+      console.log('[STATUS] Confirmed with Yes. Verifying...');
+      await waitDimmed(page);
+      await page.waitForTimeout(SLEEP_MEDIUM_MS);
+
+      // Reload so the status shown comes from the server, not from the page's own script
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+      await waitDimmed(page);
+      const after = await profileStatus(page);
+      if (/completed/i.test(after)) {
+        console.log(`[STATUS] ${student.fullName} is now COMPLETED.`);
+        await snap(page, `status_completed_${student.lastName}`);
+        return;
+      }
+      console.warn(`[STATUS WARN] Status still reads "${after}" after saving.`);
+    } catch (err) {
+      console.warn(`[STATUS WARN] Attempt ${attempt} failed: ${err.message}`);
+    }
+    await snapFailure(page, `status_not_completed_${student.lastName}_a${attempt}`);
+    await page.waitForTimeout(RETRY_PAUSE_MS);
+  }
+  throw new Error(`Could not set ${student.fullName} to Completed after ${maxAttempts} attempts`);
+}
+// --- end mark student as Completed -----------------------------------------
+
 async function assembleStudentPdf(studentName, { contractPath, permitPath, billingPath, classDPath }) {
   const finalDoc = await PDFDocument.create();
 
@@ -551,45 +655,8 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
         classDPath: null,
       };
 
-      // 5a. Return to Home Page
-      await safeClick(page, 'a[href*="/CentralizeAdmin/NewHomePage/NewHomePage"], a:has-text("Home")', 'nav_home');
-      await waitDimmed(page);
-
-      // 5b. Search Student
-      await reportProgress(`${currentNum}/${totalStudents} | ${student.fullName} | Locating student record`);
-      const iCheckWrapper = page.locator('.icheckbox_square-grey');
-      if (await iCheckWrapper.count() > 0) {
-        const isChecked = await iCheckWrapper.first().evaluate(el => el.classList.contains('checked'));
-        if (isChecked) {
-          console.log('[STUDENT] Unchecking "ACTIVE STUDENTS ONLY"...');
-          await iCheckWrapper.first().click();
-          await waitDimmed(page);
-        }
-      } else {
-        await page.locator('label:has-text("ACTIVE STUDENTS ONLY"), span:has-text("ACTIVE STUDENTS ONLY")').first().click().catch(() => {});
-      }
-      await snap(page, 'after_uncheck_active_only');
-
-      const studentInput = page.locator('#studentList');
-      await studentInput.click();
-      await studentInput.fill('');
-      await page.waitForTimeout(SLEEP_SHORT_MS);
-
-      await studentInput.pressSequentially(student.lastName, { delay: TYPE_DELAY_MS });
-      await snap(page, `typed_student_${student.lastName}`);
-
-      const autocompleteItem = page
-        .locator('.k-animation-container ul li.k-item, #studentList_listbox li.k-item')
-        .filter({ hasText: student.firstName })
-        .first();
-      await autocompleteItem.waitFor({ state: 'visible', timeout: 10000 });
-      await autocompleteItem.click();
-      await snap(page, 'selected_autocomplete_item');
-      await waitDimmed(page);
-
-      await safeClick(page, 'a.btn.green[onclick*="RedirectToStudentAccountPage"], a:text-is("Go")', 'click_student_go');
-      await waitDimmed(page);
-      await snap(page, 'student_account_loaded');
+      // 5a-b. Open the student's account from the Home page
+      await openStudentProfile(page, student, `${currentNum}/${totalStudents} | ${student.fullName}`, 'Locating student record');
 
       // 5c. Files Tab
       await reportProgress(`${currentNum}/${totalStudents} | ${student.fullName} | Compiling contract & driver permit`);
@@ -758,6 +825,21 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       // 5f. Merge Final Packet
       await reportProgress(`${currentNum}/${totalStudents} | ${student.fullName} | Compiling unified PDF packet`);
       await assembleStudentPdf(student.fullName, studentDocs);
+
+      // 5g. Mark the student as Completed (the packet is already saved, so a failure here
+      // only logs a warning and never discards the PDF)
+      if (MARK_COMPLETED) {
+        try {
+          await reportProgress(`${currentNum}/${totalStudents} | ${student.fullName} | Marking student as Completed`);
+          await openStudentProfile(page, student, `${currentNum}/${totalStudents} | ${student.fullName}`, 'Returning to profile');
+          await markStudentCompleted(page, student);
+        } catch (err) {
+          console.error(`[STATUS ERROR] ${student.fullName}: ${err.message}`);
+          await snapFailure(page, `status_failed_${student.lastName}`);
+        }
+      } else {
+        console.log(`[STATUS] Mark-as-Completed is OFF, leaving ${student.fullName}'s status unchanged.`);
+      }
       } catch (err) {
         console.error(`[SKIPPED] ${student.fullName}: ${err.message}`);
         await snapFailure(page, `skipped_${student.lastName}`);
