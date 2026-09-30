@@ -96,7 +96,7 @@ async function snap(page, stepName, { force = false } = {}) {
   const safeName = `${String(stepCounter++).padStart(3, '0')}_${stepName.replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
   const filePath = path.join(SCREENSHOT_DIR, safeName);
   try {
-    await page.screenshot({ path: filePath, fullPage: false });
+    await page.screenshot({ path: filePath, fullPage: false, timeout: 10000 });
     console.log(`[SNAPSHOT] Saved: ${safeName}`);
   } catch (err) {
     console.warn(`[SNAPSHOT WARN] Failed to capture ${safeName}: ${err.message}`);
@@ -371,9 +371,24 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     await page.fill('#password', process.env.PORTAL_PASS);
     await snap(page, 'login_credentials_filled');
 
-    await page.click('button.btn.green-haze:has-text("Login")');
+    // noWaitAfter: the click itself must not wait for the post-login page to fully load
+    // (that page can hang on slow/never-finishing requests and made the click time out).
+    await page.click('button.btn.green-haze:has-text("Login")', { noWaitAfter: true });
     console.log('[STEP 1] Submitted login. Waiting for portal load...');
-    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+    try {
+      await page.waitForURL((u) => !/\/Login\/Login/i.test(u.href), {
+        waitUntil: 'commit',
+        timeout: 60000,
+      });
+      console.log('[STEP 1] Left the login page.');
+    } catch (_) {
+      const errText = await page
+        .locator('.alert-danger, .alert, .text-danger, #divMessage, .field-validation-error')
+        .allInnerTexts()
+        .catch(() => []);
+      console.warn(`[LOGIN WARN] Still on login page after 60s. Page messages: ${JSON.stringify(errText.filter(Boolean))}`);
+    }
+    await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
     await waitDimmed(page);
     await snap(page, 'post_login_homepage');
 
