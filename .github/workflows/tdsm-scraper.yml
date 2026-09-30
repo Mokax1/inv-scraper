@@ -44,6 +44,7 @@ jobs:
       - name: Run Scraper
         working-directory: tdsm-scraper
         env:
+          PORTAL_URL: ${{ secrets.PORTAL_URL }}
           PORTAL_USER: ${{ secrets.PORTAL_USER }}
           PORTAL_PASS: ${{ secrets.PORTAL_PASS }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
