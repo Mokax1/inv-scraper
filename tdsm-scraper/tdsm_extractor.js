@@ -453,6 +453,8 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       const student = students[idx];
       const currentNum = idx + 1;
 
+      try {
+
       console.log(`\n======================================================`);
       await reportProgress(`${currentNum}/${totalStudents} | ${student.fullName} | Initializing profile`);
       console.log(`======================================================`);
@@ -488,11 +490,14 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       await studentInput.fill('');
       await page.waitForTimeout(SLEEP_SHORT_MS);
 
-      await studentInput.pressSequentially(`${student.lastName} ${student.firstName}`, { delay: TYPE_DELAY_MS });
+      await studentInput.pressSequentially(student.lastName, { delay: TYPE_DELAY_MS });
       await snap(page, `typed_student_${student.lastName}`);
 
-      const autocompleteItem = page.locator('.k-animation-container ul li.k-item, #studentList_listbox li.k-item, li.k-item').first();
-      await autocompleteItem.waitFor({ state: 'visible', timeout: 20000 });
+      const autocompleteItem = page
+        .locator('.k-animation-container ul li.k-item, #studentList_listbox li.k-item')
+        .filter({ hasText: student.firstName })
+        .first();
+      await autocompleteItem.waitFor({ state: 'visible', timeout: 10000 });
       await autocompleteItem.click();
       await snap(page, 'selected_autocomplete_item');
       await waitDimmed(page);
@@ -668,6 +673,11 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       // 5f. Merge Final Packet
       await reportProgress(`${currentNum}/${totalStudents} | ${student.fullName} | Compiling unified PDF packet`);
       await assembleStudentPdf(student.fullName, studentDocs);
+      } catch (err) {
+        console.error(`[SKIPPED] ${student.fullName}: ${err.message}`);
+        await snapFailure(page, `skipped_${student.lastName}`);
+        continue;
+      }
     }
 
     console.log('\n[COMPLETE] All student packets have been scraped and merged.');
