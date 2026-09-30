@@ -237,6 +237,88 @@ async function pickDate(page, pickerSelector, label, target) {
 }
 // --- end date range helpers -----------------------------------------------
 
+// --- database selection ----------------------------------------------------
+// The portal hosts one database per location. After login the "Switch To" dropdown lets
+// you change it; the page then reloads/redirects by itself and the active database name
+// is shown at the top of the page (#lblNav, also the bold name in .LoginUserInfo).
+const normalizeName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+async function currentDatabaseName(page) {
+  for (const sel of ['#lblNav', '.LoginUserInfo b']) {
+    try {
+      const text = ((await page.locator(sel).first().textContent({ timeout: 3000 })) || '').trim();
+      if (text) return text;
+    } catch (_) {
+      // page is mid-navigation or the element is not there yet
+    }
+  }
+  return '';
+}
+
+async function selectDatabase(page, dbKey, maxAttempts = 4) {
+  const wanted = normalizeName(dbKey);
+  if (!wanted) {
+    console.log('[DATABASE] No DATABASE given, keeping the portal default.');
+    return;
+  }
+  const matches = (name) => normalizeName(name).includes(wanted);
+  const pattern = new RegExp(String(dbKey).trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*'), 'i');
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+    await waitDimmed(page);
+
+    const before = await currentDatabaseName(page);
+    console.log(`[DATABASE] Attempt ${attempt}/${maxAttempts}: active="${before}", wanted="${dbKey}"`);
+    if (matches(before)) {
+      console.log(`[DATABASE] Correct database is active: ${before}`);
+      await reportProgress(`Database: ${before}`);
+      return;
+    }
+
+    try {
+      await reportProgress(`Switching database to ${dbKey}...`);
+      await safeClick(page, '.customSwitchto a.dropdown-toggle', `open_database_dropdown_a${attempt}`, 2);
+
+      const items = page.locator('#icheck-listApptStatus a[data-url]').filter({ hasText: pattern });
+      await items.first().waitFor({ state: 'attached', timeout: 10000 }).catch(() => {});
+      if ((await items.count()) === 0) {
+        const available = await page.locator('#icheck-listApptStatus a[data-url]').allInnerTexts().catch(() => []);
+        throw new Error(`No database matching "${dbKey}" in the dropdown. Available: ${JSON.stringify(available.map((s) => s.trim()))}`);
+      }
+      await items.first().click({ timeout: 10000, noWaitAfter: true });
+      console.log('[DATABASE] Clicked the database entry. Waiting for the portal to reload...');
+    } catch (err) {
+      console.warn(`[DATABASE WARN] Attempt ${attempt} could not click the entry: ${err.message}`);
+      await snapFailure(page, `select_database_a${attempt}`);
+      await page.waitForTimeout(RETRY_PAUSE_MS);
+      continue;
+    }
+
+    // The page refreshes / redirects on its own: poll the name until it matches (or time out and retry).
+    const deadline = Date.now() + 60000;
+    while (Date.now() < deadline) {
+      await page.waitForTimeout(1000);
+      const now = await currentDatabaseName(page);
+      if (matches(now)) {
+        await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+        await waitDimmed(page);
+        console.log(`[DATABASE] Switched successfully to: ${now}`);
+        await reportProgress(`Database: ${now}`);
+        await snap(page, 'database_selected');
+        return;
+      }
+    }
+
+    console.warn(`[DATABASE WARN] Still on "${await currentDatabaseName(page)}" after 60s. Retrying the selection...`);
+    await snapFailure(page, `database_not_switched_a${attempt}`);
+  }
+
+  throw new Error(`Could not switch to the "${dbKey}" database after ${maxAttempts} attempts (active: "${await currentDatabaseName(page)}").`);
+}
+// --- end database selection ------------------------------------------------
+
+
 async function assembleStudentPdf(studentName, { contractPath, permitPath, billingPath, classDPath }) {
   const finalDoc = await PDFDocument.create();
 
@@ -391,6 +473,9 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
     await waitDimmed(page);
     await snap(page, 'post_login_homepage');
+
+    // 1b. Select the database (location) chosen in the desktop app and verify the switch
+    await selectDatabase(page, (process.env.DATABASE || '').trim());
 
     // 2. Open Report Center -> Business Reports
     console.log('[STEP 2] Opening Report Center...');
