@@ -52,7 +52,10 @@ function githubApi(pathname, method, body) {
   });
 }
 
+let lastProgressLine = '';
+
 async function reportProgress(line) {
+  lastProgressLine = line;
   console.log(`[PROGRESS] ${line}`);
   const { GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_SHA } = process.env;
   if (!GITHUB_TOKEN || !GITHUB_REPOSITORY || !GITHUB_SHA) return;
@@ -319,6 +322,59 @@ async function selectDatabase(page, dbKey, maxAttempts = 4) {
 // --- end database selection ------------------------------------------------
 
 
+// --- robust file download + page recovery -----------------------------------
+// Clicking a file link and waiting for a "download" event breaks when the portal serves a
+// file inline (or returns an error page): the main tab navigates away to a blank page, the
+// download never fires, and every later student fails because the Home link is gone.
+// Fetching the link's URL with the browser's own cookies never moves the page.
+function sniffFileType(buf) {
+  if (buf.length >= 5 && buf.subarray(0, 5).toString('latin1') === '%PDF-') return 'pdf';
+  if (buf.length > 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'png';
+  if (buf.length > 2 && buf[0] === 0xff && buf[1] === 0xd8) return 'jpg';
+  return null;
+}
+
+async function downloadFileLink(page, link, destBase, label) {
+  const href = await link.getAttribute('href', { timeout: 10000 });
+  if (!href || href.startsWith('javascript')) {
+    throw new Error(`the ${label} link has no file address`);
+  }
+  const url = new URL(href, page.url()).href;
+  const res = await page.context().request.get(url, { timeout: 60000 });
+  if (!res.ok()) {
+    throw new Error(`the portal answered ${res.status()} when downloading the ${label}`);
+  }
+  const body = await res.body();
+  const type = sniffFileType(body);
+  if (!type) {
+    const contentType = res.headers()['content-type'] || 'unknown type';
+    throw new Error(body.length === 0
+      ? `the portal returned an empty file for the ${label} (the file may be missing or damaged on the portal)`
+      : `the ${label} is not a PDF or image (${contentType}, ${body.length} bytes); the file may be missing or damaged on the portal`);
+  }
+  const filePath = `${destBase}.${type}`;
+  fs.writeFileSync(filePath, body);
+  return filePath;
+}
+
+// Puts the browser back on the portal Home page (right database) after anything went wrong.
+let portalHomeUrl = null;
+
+async function recoverPage(page, dbKey) {
+  for (const extra of page.context().pages()) {
+    if (extra !== page) await extra.close().catch(() => {});
+  }
+  await page.keyboard.press('Escape').catch(() => {});
+  const home = page.locator('a[href*="/CentralizeAdmin/NewHomePage/NewHomePage"], a:has-text("Home")').first();
+  if (await home.isVisible({ timeout: 5000 }).catch(() => false)) return;
+
+  console.warn(`[RECOVER] The page lost the portal menu (now at ${page.url()}). Going back to Home...`);
+  await page.goto(portalHomeUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await waitDimmed(page);
+  await selectDatabase(page, dbKey);
+}
+// --- end download + recovery -------------------------------------------------
+
 // Home -> search the student -> Go. Lands on the student's Profile tab.
 async function openStudentProfile(page, student, label, stage) {
   // 5a. Return to Home Page
@@ -426,13 +482,25 @@ async function markStudentCompleted(page, student, maxAttempts = 3) {
 async function assembleStudentPdf(studentName, { contractPath, permitPath, billingPath, classDPath }) {
   const finalDoc = await PDFDocument.create();
 
-  // 1. Contract PDF
+  // 1. Contract (normally a PDF; a scanned image is placed on its own letter page)
   if (contractPath && fs.existsSync(contractPath)) {
     try {
-      const contractDoc = await PDFDocument.load(fs.readFileSync(contractPath));
-      const pages = await finalDoc.copyPages(contractDoc, contractDoc.getPageIndices());
-      pages.forEach((p) => finalDoc.addPage(p));
-      console.log(`[MERGE] Merged contract for ${studentName}`);
+      const contractBuffer = fs.readFileSync(contractPath);
+      const type = sniffFileType(contractBuffer);
+      if (type === 'png' || type === 'jpg') {
+        const img = type === 'png' ? await finalDoc.embedPng(contractBuffer) : await finalDoc.embedJpg(contractBuffer);
+        const page = finalDoc.addPage([612, 792]);
+        const scale = Math.min(532 / img.width, 712 / img.height, 1);
+        const w = img.width * scale;
+        const h = img.height * scale;
+        page.drawImage(img, { x: (612 - w) / 2, y: (792 - h) / 2, width: w, height: h });
+        console.log(`[MERGE] Embedded contract image for ${studentName}`);
+      } else {
+        const contractDoc = await PDFDocument.load(contractBuffer);
+        const pages = await finalDoc.copyPages(contractDoc, contractDoc.getPageIndices());
+        pages.forEach((p) => finalDoc.addPage(p));
+        console.log(`[MERGE] Merged contract for ${studentName}`);
+      }
     } catch (err) {
       console.error(`[MERGE ERROR] Failed loading contract: ${err.message}`);
     }
@@ -544,6 +612,9 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
   });
 
   const page = await context.newPage();
+  const dbKey = (process.env.DATABASE || '').trim();
+  // Per-student outcome, written to output/run_results.json so the desktop app can name failures
+  const runResults = [];
 
   try {
     console.log('[STEP 1] Navigating to Login Page...');
@@ -579,7 +650,13 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     await snap(page, 'post_login_homepage');
 
     // 1b. Select the database (location) chosen in the desktop app and verify the switch
-    await selectDatabase(page, (process.env.DATABASE || '').trim());
+    await selectDatabase(page, dbKey);
+
+    // Remember where Home is, so a stuck page can always be sent back there
+    const homeHref = await page.locator('a[href*="/CentralizeAdmin/NewHomePage/NewHomePage"]').first()
+      .getAttribute('href', { timeout: 10000 }).catch(() => null);
+    portalHomeUrl = new URL(homeHref || '/CentralizeAdmin/NewHomePage/NewHomePage', page.url()).href;
+    console.log(`[INFO] Portal home: ${portalHomeUrl}`);
 
     // 2. Open Report Center -> Business Reports
     console.log('[STEP 2] Opening Report Center...');
@@ -634,6 +711,21 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       }
     }
 
+    // "Retry failed only" from the desktop app: ONLY_STUDENTS is a JSON list of full names
+    const onlyRaw = (process.env.ONLY_STUDENTS || '').trim();
+    if (onlyRaw) {
+      let wanted = [];
+      try {
+        wanted = JSON.parse(onlyRaw);
+      } catch (_) {
+        wanted = onlyRaw.split(',');
+      }
+      const wantedKeys = new Set((Array.isArray(wanted) ? wanted : []).map(normalizeName).filter(Boolean));
+      const kept = students.filter((s) => wantedKeys.has(normalizeName(s.fullName)));
+      console.log(`[INFO] Retry run: ${kept.length} of ${students.length} student(s) match ONLY_STUDENTS.`);
+      students.splice(0, students.length, ...kept);
+    }
+
     const totalStudents = students.length;
     console.log(`[INFO] Found ${totalStudents} student(s) to process.`);
 
@@ -655,6 +747,9 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
         classDPath: null,
       };
 
+      // Make sure the previous student didn't leave the browser stuck somewhere
+      await recoverPage(page, dbKey);
+
       // 5a-b. Open the student's account from the Home page
       await openStudentProfile(page, student, `${currentNum}/${totalStudents} | ${student.fullName}`, 'Locating student record');
 
@@ -669,13 +764,9 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       if (contractCount > 0) {
         console.log(`[STUDENT] Found ${contractCount} contract(s). Selecting oldest...`);
         const oldestContractRow = contractRows.nth(contractCount - 1);
-        const downloadBtn = oldestContractRow.locator('a[href*="download_FileFromBlob"][href*="type=1"]');
-        const [downloadContract] = await Promise.all([
-          page.waitForEvent('download', { timeout: 30000 }),
-          downloadBtn.click(),
-        ]);
-        studentDocs.contractPath = path.join(DOWNLOADS_DIR, `${student.lastName}_contract.pdf`);
-        await downloadContract.saveAs(studentDocs.contractPath);
+        const downloadBtn = oldestContractRow.locator('a[href*="download_FileFromBlob"][href*="type=1"]').first();
+        studentDocs.contractPath = await downloadFileLink(
+          page, downloadBtn, path.join(DOWNLOADS_DIR, `${student.lastName}_contract`), 'oldest Student Contract');
         console.log(`[STUDENT] Saved contract: ${studentDocs.contractPath}`);
       }
 
@@ -685,14 +776,9 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       if (permitCount > 0) {
         console.log(`[STUDENT] Found ${permitCount} permit(s). Selecting newest...`);
         const newestPermitRow = permitRows.first();
-        const downloadBtn = newestPermitRow.locator('a[href*="download_FileFromBlob"][href*="type=1"]');
-        const [downloadPermit] = await Promise.all([
-          page.waitForEvent('download', { timeout: 30000 }),
-          downloadBtn.click(),
-        ]);
-        const ext = downloadPermit.suggestedFilename().split('.').pop() || 'jpg';
-        studentDocs.permitPath = path.join(DOWNLOADS_DIR, `${student.lastName}_permit.${ext}`);
-        await downloadPermit.saveAs(studentDocs.permitPath);
+        const downloadBtn = newestPermitRow.locator('a[href*="download_FileFromBlob"][href*="type=1"]').first();
+        studentDocs.permitPath = await downloadFileLink(
+          page, downloadBtn, path.join(DOWNLOADS_DIR, `${student.lastName}_permit`), 'newest Permit');
         console.log(`[STUDENT] Saved permit: ${studentDocs.permitPath}`);
       }
 
@@ -825,6 +911,7 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
       // 5f. Merge Final Packet
       await reportProgress(`${currentNum}/${totalStudents} | ${student.fullName} | Compiling unified PDF packet`);
       await assembleStudentPdf(student.fullName, studentDocs);
+      runResults.push({ name: student.fullName, status: 'ok' });
 
       // 5g. Mark the student as Completed (the packet is already saved, so a failure here
       // only logs a warning and never discards the PDF)
@@ -841,8 +928,19 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
         console.log(`[STATUS] Mark-as-Completed is OFF, leaving ${student.fullName}'s status unchanged.`);
       }
       } catch (err) {
+        const stage = (lastProgressLine.split('|').pop() || '').trim() || 'processing';
+        const reason = String(err.message || err).split('\n')[0].slice(0, 300);
         console.error(`[SKIPPED] ${student.fullName}: ${err.message}`);
         await snapFailure(page, `skipped_${student.lastName}`);
+        if (!runResults.some((r) => r.name === student.fullName)) {
+          runResults.push({ name: student.fullName, status: 'failed', error: `Failed while ${stage.toLowerCase()}: ${reason}` });
+          await reportProgress(`${currentNum}/${totalStudents} | ${student.fullName} | Failed: ${stage}`);
+        }
+        try {
+          await recoverPage(page, dbKey);
+        } catch (recoverErr) {
+          console.error(`[RECOVER ERROR] ${recoverErr.message}`);
+        }
         continue;
       }
     }
@@ -853,6 +951,11 @@ async function assembleStudentPdf(studentName, { contractPath, permitPath, billi
     await snapFailure(page, 'fatal_crash_state');
     process.exitCode = 1;
   } finally {
+    try {
+      fs.writeFileSync(path.join(OUTPUT_DIR, 'run_results.json'), JSON.stringify({ students: runResults }, null, 2));
+    } catch (err) {
+      console.warn(`[RESULTS WARN] Could not write run_results.json: ${err.message}`);
+    }
     await finishProgress();
     await browser.close();
   }
