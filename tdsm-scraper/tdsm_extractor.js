@@ -334,27 +334,50 @@ function sniffFileType(buf) {
   return null;
 }
 
+// 1st try: fetch the link's address (as the browser resolves it) with the session cookies.
+// 2nd try: the old click-and-wait-for-download. If that leaves the page stuck, the caller's
+// recoverPage() brings it back, so one bad file can no longer break the students after it.
 async function downloadFileLink(page, link, destBase, label) {
-  const href = await link.getAttribute('href', { timeout: 10000 });
-  if (!href || href.startsWith('javascript')) {
-    throw new Error(`the ${label} link has no file address`);
+  let fetchProblem = '';
+  try {
+    const url = await link.evaluate((a) => a.href, null, { timeout: 10000 });
+    if (!url || url.startsWith('javascript')) throw new Error('link has no file address');
+    const res = await page.context().request.get(url, {
+      timeout: 60000,
+      headers: { Referer: page.url() },
+    });
+    const body = await res.body();
+    const type = res.ok() ? sniffFileType(body) : null;
+    if (type) {
+      const filePath = `${destBase}.${type}`;
+      fs.writeFileSync(filePath, body);
+      return filePath;
+    }
+    const title = (/<title[^>]*>([^<]*)/i.exec(body.toString('utf8')) || [])[1] || '';
+    fetchProblem = `HTTP ${res.status()}, ${res.headers()['content-type'] || 'unknown type'}, ${body.length} bytes` +
+      (title ? `, page "${title.trim().slice(0, 80)}"` : '');
+    console.warn(`[DOWNLOAD WARN] Direct fetch of the ${label} did not return a file (${fetchProblem}). Trying a click...`);
+  } catch (err) {
+    fetchProblem = err.message;
+    console.warn(`[DOWNLOAD WARN] Direct fetch of the ${label} failed (${err.message}). Trying a click...`);
   }
-  const url = new URL(href, page.url()).href;
-  const res = await page.context().request.get(url, { timeout: 60000 });
-  if (!res.ok()) {
-    throw new Error(`the portal answered ${res.status()} when downloading the ${label}`);
+
+  try {
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 30000 }),
+      link.click(),
+    ]);
+    const tmp = `${destBase}.download`;
+    await download.saveAs(tmp);
+    const type = sniffFileType(fs.readFileSync(tmp)) ||
+      (download.suggestedFilename().split('.').pop() || 'pdf').toLowerCase();
+    const filePath = `${destBase}.${type}`;
+    fs.renameSync(tmp, filePath);
+    return filePath;
+  } catch (err) {
+    throw new Error(`could not download the ${label} from the portal; the file may be missing or damaged ` +
+      `(click: ${String(err.message).split('\n')[0]}; fetch: ${fetchProblem})`);
   }
-  const body = await res.body();
-  const type = sniffFileType(body);
-  if (!type) {
-    const contentType = res.headers()['content-type'] || 'unknown type';
-    throw new Error(body.length === 0
-      ? `the portal returned an empty file for the ${label} (the file may be missing or damaged on the portal)`
-      : `the ${label} is not a PDF or image (${contentType}, ${body.length} bytes); the file may be missing or damaged on the portal`);
-  }
-  const filePath = `${destBase}.${type}`;
-  fs.writeFileSync(filePath, body);
-  return filePath;
 }
 
 // Puts the browser back on the portal Home page (right database) after anything went wrong.
